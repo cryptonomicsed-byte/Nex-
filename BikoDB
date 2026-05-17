@@ -1,0 +1,90 @@
+**✅ Integration Plan: Nex- + BikoDB into Omo-koda**
+
+### High-Level Vision
+**Nex-** provides the **high-level agent graph execution** layer.  
+**BikoDB** provides the **high-performance persistent multi-model storage** layer.  
+
+Together they form a powerful **Memory + Execution Engine** under the control of the Rust Steward.
+
+---
+
+### Proposed Architecture
+
+```
+User (TypeScript UI)
+        ↓
+   3 Primitives
+        ↓
+   Rust Steward (Èṣù Gatekeeper)
+        ↓
+   ┌─────────────────────┐
+   │   Nex- Runtime      │ ← Graph execution, orchestration, spawning
+   └─────────────────────┘
+        ↓
+   ┌─────────────────────┐
+   │   BikoDB            │ ← Persistent graph + vector + document store
+   └─────────────────────┘
+```
+
+**Data Flow**:
+- Nex- graphs (nodes, links, guards, rewrites) are stored in BikoDB.
+- Steward calls Nex- for high-level planning and execution.
+- BikoDB handles fast semantic recall (HNSW vectors), graph queries, and long-term persistence.
+
+---
+
+### Detailed Integration Plan
+
+**Phase 1: Storage Foundation (BikoDB First)**
+
+1. Add BikoDB as a dependency in `omokoda-core` (via Rust FFI or embedded mode).
+2. Define core schemas in BikoDB:
+   - `AgentNodes` (with Odu soul seed, DNA fingerprint)
+   - `MemoryLinks` (relationships between thoughts, receipts, actions)
+   - `VectorEmbeddings` (for semantic search)
+   - `Receipts` (Merkle tree + signatures)
+3. Implement basic CRUD + vector search wrappers in Rust.
+
+**Phase 2: Nex- Graph Runtime Integration**
+
+1. Embed or bridge Nex- (TypeScript) via:
+   - WASM (preferred for security)
+   - Or Rust-to-Node bridge (if needed)
+2. Map Nex- concepts to Omo-koda:
+   - Nex- Nodes → Omo-koda Actions / Thoughts
+   - Nex- Guards → Hermetic Principles + Justice checks
+   - Nex- Rewrites → Natural Think compilation
+3. Store all Nex- graphs persistently in BikoDB.
+
+**Phase 3: Steward Integration (Gatekeeper Layer)**
+
+- Steward remains the single entry point.
+- `think` → sends intent to Nex- for graph compilation.
+- `act` → executes Nex- graph steps with BikoDB backing.
+- All private data stays encrypted and routed through Steward.
+- Add ResonanceSignature weighting to influence graph execution priority.
+
+**Phase 4: Advanced Features**
+
+- Semantic memory recall using BikoDB HNSW vectors.
+- Agent spawning via Nex- graph forking.
+- Long-term memory compression and RACK scoring stored in BikoDB.
+- Garden (public) vs Seal (private) separation at the BikoDB layer.
+
+---
+
+### Benefits of This Combination
+
+- **Performance**: BikoDB (Rust) gives fast storage + vector search.
+- **Expressiveness**: Nex- gives powerful graph-based agent programming.
+- **Sovereignty**: Everything stays under Rust Steward control.
+- **Scalability**: Supports single agent → swarm naturally.
+
+---
+
+Would you like me to expand this into:
+- A full coding prompt for your agent?
+- Detailed schema designs for BikoDB?
+- Or a phased implementation roadmap with timelines?
+
+Let me know how deep you want to go.
