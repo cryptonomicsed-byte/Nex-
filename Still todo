@@ -1,0 +1,3220 @@
+Here's the complete picture — everything you need to build the universal plugin architecture:
+
+---
+
+The Core Insight
+
+Every repo is sovereign. Each runs standalone with its own REST API, can be consumed by any project, and has an optional "native mode" for deep Ọmọ Kọ́dà integration.
+
+The Ọ̀RÍ Dashboard is the primary human interface. It talks only to the Omo-Koda2 Orchestrator. The orchestrator talks to all plugins. Plugins never talk to each other directly.
+
+---
+
+Architecture Layers
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  LAYER 0: Ọ̀RÍ DASHBOARD (Next.js)                                          │
+│  10 Orisha panels. Primary human interface.                                  │
+│  Talks ONLY to Omo-Koda2 Orchestrator. NEVER to plugins directly.            │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  LAYER 1: OMO-KODA2 ORCHESTRATOR (Rust)                                    │
+│  Backend conductor. Routes, manages state, enforces policy, handles billing. │
+│  Discovers plugins dynamically via manifest.json.                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+            ┌───────────────────────┼───────────────────────┐
+            │                       │                       │
+            ▼                       ▼                       ▼
+┌───────────────────┐ ┌───────────────────┐ ┌───────────────────┐
+│ BIPỌ̀N39 Plugin    │ │ IfáScript Plugin  │ │ Ritual Codex      │
+│ :8081              │ │ :8082             │ │ Plugin :8083      │
+│                    │ │                   │ │                   │
+│ REST API           │ │ REST API          │ │ REST API          │
+│ API key auth       │ │ API key auth      │ │ API key auth      │
+│ Rate limiting      │ │ Rate limiting     │ │ Rate limiting     │
+│ Billing hooks      │ │ Billing hooks     │ │ Billing hooks     │
+│ Native mode opt    │ │ Native mode opt   │ │ Native mode opt   │
+└───────────────────┘ └───────────────────┘ └───────────────────┘
+            │                       │                       │
+            ▼                       ▼                       ▼
+┌───────────────────┐ ┌───────────────────┐ ┌───────────────────┐
+│ vanity2 Plugin    │ │ Sui Plugin        │ │ (Your Plugin)     │
+│ :8084              │ │ :8085             │ │ :8086             │
+│                    │ │                   │ │                   │
+│ REST API           │ │ REST API          │ │ REST API          │
+│ API key auth       │ │ API key auth      │ │ API key auth      │
+│ Rate limiting      │ │ Rate limiting     │ │ Rate limiting     │
+│ Billing hooks      │ │ Billing hooks     │ │ Billing hooks     │
+│ Native mode opt    │ │ Native mode opt   │ │ Native mode opt   │
+└───────────────────┘ └───────────────────┘ └───────────────────┘
+```
+
+---
+
+Every Plugin MUST Have
+
+Requirement	Purpose	
+Standalone binary	`cargo run`, `julia main.jl`, `npm start`	
+REST API server	Axum, Actix, Genie.jl, Express, Fastify	
+manifest.json	Discovery, configuration, dashboard panels	
+Health endpoint	`GET /health` → `{"status": "ok"}`	
+API key auth	`X-API-Key` header	
+Rate limiting	Token bucket with `X-RateLimit-*` headers	
+Billing hooks	Usage reporting for monetization	
+OpenAPI spec	`./openapi.yaml`	
+
+---
+
+Plugin API Endpoints
+
+BIPỌ̀N39 Plugin (`:8081`)
+
+Endpoint	Free Tier	Purpose	
+`POST /v1/mnemonic/generate`	100/day	Generate 33-word Yorùbá mnemonic	
+`POST /v1/mnemonic/inspect`	500/day	Get macro/micro/nano + personality	
+`POST /v1/seed/derive`	200/day	PBKDF2 + master key derivation	
+`POST /v1/convert/2048`	100/day	Dual-mode BIP-39 conversion	
+
+IfáScript Plugin (`:8082`)
+
+Endpoint	Free Tier	Purpose	
+`POST /v1/divination/cast`	50/day	Run VM birth program	
+`POST /v1/entropy/cowrie`	1k/day	Cast cowries for entropy	
+`POST /v1/ebo/evaluate`	1k/day	Ethical exception handling	
+`GET /v1/odu/{index}`	10k/day	Odu chapter lookup	
+
+Ritual Codex Plugin (`:8083`)
+
+Endpoint	Free Tier	Purpose	
+`GET /v1/resonance/today`	10k/day	Daily resonance JSON	
+`GET /v1/resonance/{date}`	5k/day	Historical resonance	
+`GET /v1/almanac/{year}`	10/day	Full year almanac	
+`POST /v1/agent/lifecycle`	100/day	Spawn/terminate/jubilee	
+`GET /v1/btc/time`	Unlimited	BTC block height time	
+
+vanity2 Plugin (`:8084`)
+
+Endpoint	Free Tier	Purpose	
+`POST /v1/vanity/generate`	10/day	Brute-force vanity address	
+`POST /v1/cloakseed/encode`	100/day	Hide mnemonic in cipher	
+`POST /v1/cloakseed/decode`	100/day	Recover from cipher	
+`POST /v1/poison/scan`	500/day	On-chain risk scan	
+`POST /v1/wallet/derive`	1k/day	Multi-chain HD derivation	
+`POST /v1/create2/brute`	5/day	Contract address brute-force	
+
+Sui Plugin (`:8085`)
+
+Endpoint	Free Tier	Purpose	
+`POST /v1/identity/register`	10/day	On-chain agent identity	
+`GET /v1/identity/{agent_id}`	10k/day	Identity lookup	
+`POST /v1/reputation/update`	100/day	Reputation score update	
+`POST /v1/receipt/anchor`	500/day	Receipt Merkle root anchor	
+`POST /v1/tokenomics/transfer`	50/day	Token transfer	
+
+---
+
+Dashboard → Orchestrator API
+
+The dashboard never talks to plugins. It talks to Omo-Koda2, which orchestrates everything.
+
+Endpoint	What Orchestrator Does	SLA	
+`POST /api/v1/agent/birth`	Calls all 5 plugins → seals → returns agent	< 5s	
+`POST /api/v1/agent/think`	Gates → entropy → LLM → receipt	< 30s	
+`POST /api/v1/agent/act`	Gates → poison scan → tool → receipt	< 10s	
+`GET /api/v1/agent/{id}`	Full agent object with all layers	< 100ms	
+`GET /api/v1/dashboard/panels`	All 10 panel statuses + live metrics	< 100ms	
+
+---
+
+Birth Orchestration (What Happens When User Clicks "Birth")
+
+```
+Dashboard POST /api/v1/agent/birth
+    │
+    ▼
+Omo-Koda2 Orchestrator
+    │
+    ├──► BIPỌ̀N39 :8081 POST /v1/mnemonic/generate
+    │    └── mnemonic, seed, master_key
+    │
+    ├──► IfáScript :8082 POST /v1/divination/cast
+    │    └── odu_index, hidden_orisha, ebo_pattern, ase_granted
+    │
+    ├──► Ritual Codex :8083 GET /v1/resonance/today
+    │    └── resonance_config, gate_status, economic_multiplier
+    │
+    ├──► vanity2 :8084 POST /v1/wallet/derive (×6 chains)
+    │    └── eth, btc, sol, sui, atom, apt addresses
+    │
+    ├──► Sui :8085 POST /v1/identity/register
+    │    └── sui_object_id, tx_digest
+    │
+    ├──► SEAL Vault: encrypt hidden soul
+    │
+    ├──► Create AgentSnapshot
+    │
+    └──► Return to Dashboard
+```
+
+---
+
+Monetization
+
+Model	Who Uses It	Price	
+Self-hosted	Developers, communities	Free (MIT)	
+API SaaS	Apps, startups	0 / 29/mo / 299/mo	
+White-label	Exchanges, platforms	Commercial license	
+
+Revenue split: 70% to maintainer, 20% ecosystem fund, 10% infrastructure.
+
+---
+
+Native Mode vs HTTP Mode
+
+Factor	Native	HTTP	
+Latency	< 1ms	1-50ms	
+Throughput	10k+ req/s	1-5k req/s	
+Language	Rust only	Any	
+Crash isolation	Shared	Isolated	
+Use case	Critical path	External, background	
+
+Rule of thumb: Internal critical-path plugins (BIPỌ̀N39, IfáScript, Ritual Codex) → native. External plugins, different languages, independent scaling → HTTP.
+
+---
+
+16-Week Build Order
+
+Phase	Weeks	What to Build	
+1	1-2	PluginManifest, PluginRegistry, discovery, health checks, API client	
+2	3-4	BIPỌ̀N39 plugin server (Axum), 4 endpoints, auth, native mode	
+3	5-6	Ritual Codex plugin server (HTTP.jl/Genie), 5 endpoints, gate integration	
+4	7-8	IfáScript plugin server (Axum), 4 endpoints, complete 256 Odu	
+5	9-10	vanity2 plugin server (Fastify), 6 endpoints, wallet integration	
+6	11-12	Sui Move contracts + API server, 5 endpoints, testnet	
+7	13-16	Ọ̀RÍ Dashboard (Next.js), 10 panels, WebSocket, birth wizard	
+
+---
+
+Complete Documentation
+
+- [universal_plugin_architecture.json](sandbox:///mnt/agents/output/universal_plugin_architecture.json) — Machine-readable full spec
+- [universal_plugin_architecture_complete.md](sandbox:///mnt/agents/output/universal_plugin_architecture_complete.md) — Human-readable complete guide
+- [universal_plugin_architecture_part2.md](sandbox:///mnt/agents/output/universal_plugin_architecture_part2.md) — Deep technical details (manifest schema, registry code, billing engine, security model, deployment architecture)
+
+Every repo is sovereign. Every repo is monetizable. Every repo connects through universal APIs. Àṣẹ.
+
+{
+  "title": "NEX- FULL DEV HANDOFF \u2014 \u00d2g\u00fan / Execution / Forge / Tier 16384",
+  "version": "2.0",
+  "date": "2026-05-29",
+  "part_1_current_state": {
+    "repo": "https://github.com/omo-koda/Nex-",
+    "language": "TypeScript (Bun)",
+    "current_version": "v1.0",
+    "tier": 16384,
+    "archetype": {
+      "orisha": "\u00d2g\u00fan",
+      "universal": "Execution / Forge",
+      "dashboard_word": "Run"
+    },
+    "existing_files": [
+      {
+        "file": "nex-runtime.ts",
+        "status": "\u2705",
+        "description": "NexInterpreter class \u2014 recursive eval, link traversal"
+      },
+      {
+        "file": "bootstrap.ts",
+        "status": "\u2705",
+        "description": "Bootstrap executor \u2014 loads graph, validates, executes"
+      },
+      {
+        "file": "bootstrap-2026-debate.json",
+        "status": "\u2705",
+        "description": "Complete debate graph \u2014 2 parallel agents + 1 critic + guards + merge"
+      },
+      {
+        "file": "bootstrap-2026-debate-output.json",
+        "status": "\u2705",
+        "description": "Generated output from execution"
+      },
+      {
+        "file": "NEX_SEED_PROMPT_v1.1.md",
+        "status": "\u2705",
+        "description": "Original seed prompt and lock-in axioms"
+      }
+    ],
+    "current_graph_schema_v1": {
+      "nodes": [
+        {
+          "id": "string",
+          "kind": "goal|agent|memory|tool|guard|rewrite|reflect|merge|parallel",
+          "data": "any",
+          "orisha": "string",
+          "hermetic": "string",
+          "note": "string"
+        }
+      ],
+      "links": [
+        {
+          "from": "string",
+          "to": "string",
+          "type": "sync|async|parallel|depend"
+        }
+      ],
+      "entry": "start_node_id",
+      "result": "optional_final_value",
+      "meta": {}
+    },
+    "current_primitive_kinds": [
+      "goal",
+      "agent",
+      "memory",
+      "tool",
+      "guard",
+      "rewrite",
+      "reflect",
+      "merge",
+      "parallel"
+    ],
+    "current_link_types": [
+      "sync",
+      "async",
+      "parallel",
+      "depend"
+    ]
+  },
+  "part_2_ecosystem_map": {
+    "description": "All 12 repos integrated into or connected through Nex-",
+    "dependencies": [
+      {
+        "#": 1,
+        "repo": "https://github.com/omo-koda/Nex-",
+        "orisha": "\u00d2g\u00fan",
+        "role": "Core graph runtime \u2014 execution engine",
+        "language": "TypeScript/Bun",
+        "integration_type": "Core",
+        "what_nex_uses": "Graph runtime, 7 primitives, recursive eval",
+        "standalone_vs_ecosystem": "Always on"
+      },
+      {
+        "#": 2,
+        "repo": "https://github.com/omo-koda/Omo-Koda2",
+        "orisha": "\u1eccm\u1ecd K\u1ecd\u0301d\u00e0",
+        "role": "Steward dispatch, sandbox, receipt format, 7-gate enforcement",
+        "language": "Rust+Elixir+Go",
+        "integration_type": "Direct",
+        "what_nex_uses": "Steward control, sandbox, receipt chain",
+        "standalone_vs_ecosystem": "Optional \u2014 adds security"
+      },
+      {
+        "#": 3,
+        "repo": "https://github.com/Bino-Elgua/Twelve-thrones",
+        "orisha": "\u1eccb\u00e0t\u00e1l\u00e1",
+        "role": "12-model consensus, truth-density scoring for guard nodes",
+        "language": "TypeScript+Move",
+        "integration_type": "Direct",
+        "what_nex_uses": "Guard verification, truth-density",
+        "standalone_vs_ecosystem": "Optional \u2014 adds verification"
+      },
+      {
+        "#": 4,
+        "repo": "https://github.com/omo-koda/ifascript",
+        "orisha": "\u1ecc\u0300r\u00fanm\u00ecl\u00e0",
+        "role": "256 Od\u00f9 signatures, LARQL graph traversal for query nodes",
+        "language": "Rust",
+        "integration_type": "Direct",
+        "what_nex_uses": "256 signature assignment, LARQL query",
+        "standalone_vs_ecosystem": "Optional \u2014 adds knowledge queries"
+      },
+      {
+        "#": 5,
+        "repo": "https://github.com/omo-koda/Ritual-codex-Julia",
+        "orisha": "\u1ecc\u0300\u1e63un",
+        "role": "343 resonance signatures, temporal state modulation of graph execution",
+        "language": "Julia+JS",
+        "integration_type": "Direct",
+        "what_nex_uses": "Temporal modulation, resonance",
+        "standalone_vs_ecosystem": "Optional \u2014 adds time-awareness"
+      },
+      {
+        "#": 6,
+        "repo": "https://github.com/Bino-Elgua/Scarabswarm",
+        "orisha": "\u1eccya",
+        "role": "6-DOF physics simulation, SHA256 trajectory proofs for eval nodes",
+        "language": "Julia",
+        "integration_type": "Direct",
+        "what_nex_uses": "Simulation eval, trajectory proofs",
+        "standalone_vs_ecosystem": "Optional \u2014 adds simulation"
+      },
+      {
+        "#": 7,
+        "repo": "https://github.com/omo-koda/AIO",
+        "orisha": "\u1e62\u00e0ng\u00f3",
+        "role": "Escrow lock, payment release, reputation update for payment nodes",
+        "language": "Sui Move",
+        "integration_type": "Direct",
+        "what_nex_uses": "Payment release, escrow, reputation",
+        "standalone_vs_ecosystem": "Optional \u2014 adds economics"
+      },
+      {
+        "#": 8,
+        "repo": "https://github.com/omo-koda/Bipon39-Rust-",
+        "orisha": "\u00c8\u1e63\u00f9",
+        "role": "Agent DNA, personality profile, seed derivation for spawn primitive",
+        "language": "Rust",
+        "integration_type": "Direct",
+        "what_nex_uses": "Identity seed, DNA, spawn",
+        "standalone_vs_ecosystem": "Optional \u2014 adds identity"
+      },
+      {
+        "#": 9,
+        "repo": "https://github.com/omo-koda/organism-core",
+        "orisha": "Yem\u1ecdja",
+        "role": "8-phase breath cycle, bridge wiring for ecosystem connectivity",
+        "language": "TypeScript",
+        "integration_type": "Pattern",
+        "what_nex_uses": "Lifecycle, breath cycle, bridges",
+        "standalone_vs_ecosystem": "Optional \u2014 adds lifecycle"
+      },
+      {
+        "#": 10,
+        "repo": "https://github.com/Bino-Elgua/Witness-firmware",
+        "orisha": "Ol\u00f3kun",
+        "role": "LoRa sensor data, gossip consensus for real-world eval nodes",
+        "language": "MicroPython",
+        "integration_type": "Direct",
+        "what_nex_uses": "Hardware sensor data, real-world eval",
+        "standalone_vs_ecosystem": "Optional \u2014 adds hardware"
+      },
+      {
+        "#": 11,
+        "repo": "https://github.com/omo-koda/vanity2",
+        "orisha": "\u00c0\u1e63\u1eb9",
+        "role": "CloakSeed cipher, secure identity, WASM portable modules for edge execution",
+        "language": "TypeScript+WASM",
+        "integration_type": "Pattern",
+        "what_nex_uses": "WASM portable, secure identity",
+        "standalone_vs_ecosystem": "Optional \u2014 adds portability"
+      },
+      {
+        "#": 12,
+        "repo": "https://github.com/Bino-Elgua/Omokoda",
+        "orisha": "B\u00edn\u00f2 \u00c8L Gu\u00e0 / Human",
+        "role": "Dashboard UI, 11-lobe polyphony, causal memory DAG",
+        "language": "TypeScript+Rust+Move",
+        "integration_type": "Pattern",
+        "what_nex_uses": "Visualization, human interface",
+        "standalone_vs_ecosystem": "Optional \u2014 adds visualization"
+      }
+    ],
+    "pattern_sources": [
+      {
+        "repo": "https://github.com/DioCrafts/BikoDB",
+        "status": "Study patterns only \u2014 not integrated"
+      },
+      {
+        "repo": "https://github.com/Bino-Elgua/Swibe",
+        "status": "Patterns merged into Nex- compiler"
+      },
+      {
+        "repo": "https://github.com/Bino-Elgua/vibe-lang",
+        "status": "Patterns merged into Nex- syntax"
+      },
+      {
+        "repo": "https://github.com/Bino-Elgua/Aether",
+        "status": "Patterns merged into Nex- marketplace"
+      },
+      {
+        "repo": "https://github.com/Bino-Elgua/paradigm",
+        "status": "Patterns merged into guard reasoning"
+      },
+      {
+        "repo": "https://github.com/Bino-Elgua/Claw-code",
+        "status": "Patterns merged into runtime security"
+      },
+      {
+        "repo": "https://github.com/Bino-Elgua/Swarmide2",
+        "status": "Patterns merged into organism-core"
+      },
+      {
+        "repo": "https://github.com/Bino-Elgua/Droidclaw",
+        "status": "Merged into Witness-firmware"
+      },
+      {
+        "repo": "https://github.com/Bino-Elgua/WorkMesh",
+        "status": "Merged into AIO"
+      },
+      {
+        "repo": "https://github.com/omo-koda/Techgnos-.EXE",
+        "status": "Merged into \u00c0\u1e63\u1eb9 (vanity2) shrine overlay"
+      },
+      {
+        "repo": "https://github.com/omo-koda/Zangbeto",
+        "status": "Merged into Twelve-thrones"
+      },
+      {
+        "repo": "https://github.com/omo-koda/Lattice-phase1",
+        "status": "Standalone \u2014 not in 12"
+      }
+    ]
+  },
+  "part_3_target_architecture": {
+    "flow": "User Intent \u2192 Nex- Graph Compilation \u2192 7 Gates Check \u2192 Execution \u2192 Receipt \u2192 AIO Payment",
+    "target_graph_schema_v2": {
+      "header": {
+        "agent_id": "0x...",
+        "parent_hash": "0x...",
+        "od\u00f9_signature": "256-bit",
+        "temporal_state": {
+          "day": 3,
+          "resonance_signature": "Harmonious Mind of \u1e62\u00e0ng\u00f3",
+          "hermetic_weight": 0.87
+        },
+        "synapse_budget": 2400,
+        "receipt_target": "0x..."
+      },
+      "nodes": [
+        {
+          "id": "intent_parse",
+          "kind": "goal",
+          "data": "optimize delivery route for Block 7A",
+          "orisha": "\u1ecc\u0300r\u00fanm\u00ecl\u00e0",
+          "hermetic": "Mentalism",
+          "guard": "truth_density > 0.75",
+          "od\u00f9_influence": 0.91
+        },
+        {
+          "id": "knowledge_query",
+          "kind": "query",
+          "data": "DESCRIBE block:7A WHERE traffic < threshold",
+          "orisha": "\u1ecc\u0300r\u00fanm\u00ecl\u00e0",
+          "hermetic": "Correspondence",
+          "larql": true
+        },
+        {
+          "id": "route_compute",
+          "kind": "tool",
+          "data": "pathfinding_algorithm",
+          "orisha": "\u00d2g\u00fan",
+          "hermetic": "Execution"
+        },
+        {
+          "id": "simulation_verify",
+          "kind": "eval",
+          "data": "scarab_simulation",
+          "orisha": "\u1eccya",
+          "hermetic": "Cause & Effect",
+          "proof_required": "sha256_trajectory"
+        },
+        {
+          "id": "truth_check",
+          "kind": "guard",
+          "data": "twelve_thrones_consensus",
+          "orisha": "\u1eccb\u00e0t\u00e1l\u00e1",
+          "hermetic": "Polarity",
+          "consensus_threshold": 0.8
+        },
+        {
+          "id": "payment_release",
+          "kind": "tool",
+          "data": "aio_escrow_release",
+          "orisha": "\u1e62\u00e0ng\u00f3",
+          "hermetic": "Justice"
+        }
+      ],
+      "links": [
+        {
+          "from": "intent_parse",
+          "to": "knowledge_query",
+          "type": "sync"
+        },
+        {
+          "from": "knowledge_query",
+          "to": "route_compute",
+          "type": "sync"
+        },
+        {
+          "from": "route_compute",
+          "to": "simulation_verify",
+          "type": "parallel"
+        },
+        {
+          "from": "simulation_verify",
+          "to": "truth_check",
+          "type": "sync"
+        },
+        {
+          "from": "truth_check",
+          "to": "payment_release",
+          "type": "sync"
+        }
+      ],
+      "entry": "intent_parse",
+      "meta": {
+        "graph_version": "2.0",
+        "compiler": "Nex-v1.2",
+        "ecosystem": "Omo-koda-12"
+      }
+    }
+  },
+  "part_4_primitives_build_spec": {
+    "primitives": [
+      {
+        "primitive": "node",
+        "current_state": "\u2705 Basic kinds",
+        "needs_building": "Add query kind (LARQL), eval kind (Scarab sim, Witness sensor)",
+        "integration_repo": "ifascript, Scarabswarm, Witness-firmware"
+      },
+      {
+        "primitive": "link",
+        "current_state": "\u2705 4 types",
+        "needs_building": "Add conditional link type (guard-dependent routing)",
+        "integration_repo": "Omo-Koda2"
+      },
+      {
+        "primitive": "guard",
+        "current_state": "\u2705 Basic guard string",
+        "needs_building": "Formalize conflict resolution; integrate Twelve-thrones truth-density",
+        "integration_repo": "Twelve-thrones, Omo-Koda2"
+      },
+      {
+        "primitive": "spawn",
+        "current_state": "\u2705 Basic spawn",
+        "needs_building": "Inherit parent guards + Bipon39 DNA + temporal state",
+        "integration_repo": "Bipon39, Ritual-codex"
+      },
+      {
+        "primitive": "rewrite",
+        "current_state": "\u2705 Basic rewrite",
+        "needs_building": "Prove convergence (mathematical); add stability metrics",
+        "integration_repo": "Internal proof"
+      },
+      {
+        "primitive": "merge",
+        "current_state": "\u2705 Basic merge",
+        "needs_building": "Add consensus merge strategy (Twelve-thrones weighted vote)",
+        "integration_repo": "Twelve-thrones"
+      },
+      {
+        "primitive": "eval",
+        "current_state": "\u2705 Basic eval",
+        "needs_building": "Add simulation eval (Scarab), hardware eval (Witness), payment eval (AIO)",
+        "integration_repo": "Scarabswarm, Witness-firmware, AIO"
+      }
+    ]
+  },
+  "part_5_file_structure_target": "\nNex/\n\u251c\u2500\u2500 src/\n\u2502   \u251c\u2500\u2500 runtime/\n\u2502   \u2502   \u251c\u2500\u2500 interpreter.ts          \u2190 was nex-runtime.ts\n\u2502   \u2502   \u251c\u2500\u2500 bootstrap.ts            \u2190 entry point\n\u2502   \u2502   \u251c\u2500\u2500 header.ts               \u2190 ecosystem header parser\n\u2502   \u2502   \u2514\u2500\u2500 context.ts              \u2190 temporal state + agent context\n\u2502   \u2502\n\u2502   \u251c\u2500\u2500 primitives/\n\u2502   \u2502   \u251c\u2500\u2500 node.ts\n\u2502   \u2502   \u251c\u2500\u2500 link.ts\n\u2502   \u2502   \u251c\u2500\u2500 guard.ts                \u2190 Twelve-thrones integration\n\u2502   \u2502   \u251c\u2500\u2500 spawn.ts                \u2190 Bipon39 DNA inheritance\n\u2502   \u2502   \u251c\u2500\u2500 rewrite.ts\n\u2502   \u2502   \u251c\u2500\u2500 merge.ts                \u2190 consensus strategies\n\u2502   \u2502   \u2514\u2500\u2500 eval.ts                 \u2190 Scarab/Witness/AIO hooks\n\u2502   \u2502\n\u2502   \u251c\u2500\u2500 compiler/\n\u2502   \u2502   \u251c\u2500\u2500 intent-to-graph.ts      \u2190 think primitive\n\u2502   \u2502   \u251c\u2500\u2500 od\u00f9-influence.ts        \u2190 ifascript integration\n\u2502   \u2502   \u2514\u2500\u2500 resonance-modulator.ts  \u2190 Ritual-codex integration\n\u2502   \u2502\n\u2502   \u251c\u2500\u2500 bridges/                    \u2190 NEW: ecosystem bridges\n\u2502   \u2502   \u251c\u2500\u2500 omo-koda2.ts            \u2190 Steward dispatch\n\u2502   \u2502   \u251c\u2500\u2500 twelve-thrones.ts       \u2190 truth-density\n\u2502   \u2502   \u251c\u2500\u2500 ifascript.ts            \u2190 LARQL query\n\u2502   \u2502   \u251c\u2500\u2500 scarabswarm.ts          \u2190 simulation\n\u2502   \u2502   \u251c\u2500\u2500 witness-firmware.ts     \u2190 sensor data\n\u2502   \u2502   \u251c\u2500\u2500 aio.ts                  \u2190 escrow/payment\n\u2502   \u2502   \u251c\u2500\u2500 bipon39.ts              \u2190 DNA/spawn\n\u2502   \u2502   \u2514\u2500\u2500 ritual-codex.ts         \u2190 temporal state\n\u2502   \u2502\n\u2502   \u251c\u2500\u2500 guards/\n\u2502   \u2502   \u251c\u2500\u2500 truth-density.ts\n\u2502   \u2502   \u2514\u2500\u2500 conflict-resolution.ts\n\u2502   \u2502\n\u2502   \u251c\u2500\u2500 wasm/\n\u2502   \u2502   \u2514\u2500\u2500 runtime.wasm.ts         \u2190 \u00c0\u1e63\u1eb9 portable layer\n\u2502   \u2502\n\u2502   \u2514\u2500\u2500 types/\n\u2502       \u251c\u2500\u2500 v1.ts                   \u2190 current schema\n\u2502       \u2514\u2500\u2500 v2.ts                   \u2190 target schema\n\u2502\n\u251c\u2500\u2500 tests/\n\u2502   \u251c\u2500\u2500 unit/\n\u2502   \u251c\u2500\u2500 integration/\n\u2502   \u2514\u2500\u2500 scenarios/                  \u2190 1000+ graphs\n\u2502\n\u251c\u2500\u2500 graphs/\n\u2502   \u251c\u2500\u2500 bootstrap-2026-debate.json\n\u2502   \u251c\u2500\u2500 bootstrap-2026-debate-output.json\n\u2502   \u2514\u2500\u2500 examples/                   \u2190 v2.0 example graphs\n\u2502\n\u251c\u2500\u2500 docs/\n\u2502   \u251c\u2500\u2500 NEX_SEED_PROMPT_v1.1.md\n\u2502   \u251c\u2500\u2500 SPECIFICATION.md            \u2190 generated by agents\n\u2502   \u2514\u2500\u2500 PHILOSOPHY.md\n\u2502\n\u251c\u2500\u2500 package.json\n\u251c\u2500\u2500 tsconfig.json\n\u2514\u2500\u2500 README.md\n",
+  "part_6_build_plan": {
+    "week_1_schema_header": {
+      "focus": "Graph Schema v2.0 + Header Integration",
+      "tasks": [
+        "Add header object to graph schema (agent_id, parent_hash, od\u00f9_signature, temporal_state, synapse_budget, receipt_target)",
+        "Integrate Bipon39 seed derivation into spawn primitive",
+        "Integrate Ritual-codex temporal state into graph execution context",
+        "Add query node kind with LARQL flag"
+      ],
+      "files_to_modify": [
+        "src/runtime/interpreter.ts \u2014 Add header parsing, temporal context injection",
+        "src/runtime/bootstrap.ts \u2014 Add header validation step",
+        "src/types/v2.ts \u2014 Graph schema v2.0 types",
+        "src/primitives/spawn.ts \u2014 Bipon39 DNA inheritance",
+        "src/bridges/bipon39.ts \u2014 DNA bridge wrapper",
+        "src/bridges/ritual-codex.ts \u2014 Temporal state bridge"
+      ],
+      "deliverable": "Graph compiles with full ecosystem header"
+    },
+    "week_2_guard_truth": {
+      "focus": "Guard Integration + Truth-Density",
+      "tasks": [
+        "Integrate Twelve-thrones consensus into guard primitive",
+        "Add truth-density scoring to all eval nodes",
+        "Build guard conflict resolution algorithm",
+        "Add conditional link type"
+      ],
+      "files_to_modify": [
+        "src/runtime/interpreter.ts \u2014 Add guard resolution logic",
+        "src/primitives/guard.ts \u2014 Twelve-thrones integration",
+        "src/primitives/link.ts \u2014 Add conditional type",
+        "src/guards/truth-density.ts \u2014 Twelve-thrones integration",
+        "src/guards/conflict-resolution.ts \u2014 Formal algorithm",
+        "src/bridges/twelve-thrones.ts \u2014 Wrap ritual-router-v8"
+      ],
+      "deliverable": "Guards verify through 12-model consensus before graph continues"
+    },
+    "week_3_simulation_hardware_payment": {
+      "focus": "Simulation + Hardware + Payment Integration",
+      "tasks": [
+        "Integrate Scarabswarm simulation into eval nodes",
+        "Integrate Witness-firmware sensor data ingestion",
+        "Integrate AIO escrow into payment nodes",
+        "Add SHA256 trajectory proof attachment"
+      ],
+      "files_to_modify": [
+        "src/runtime/interpreter.ts \u2014 Add eval hooks for external systems",
+        "src/primitives/eval.ts \u2014 Scarab/Witness/AIO hooks",
+        "src/bridges/scarabswarm.ts \u2014 Julia JSON bridge",
+        "src/bridges/witness-firmware.ts \u2014 Sensor data bridge",
+        "src/bridges/aio.ts \u2014 Payment bridge"
+      ],
+      "deliverable": "Full act primitive executes through simulation, hardware, and payment"
+    },
+    "week_4_compiler_wasm": {
+      "focus": "Compilation Pipeline + WASM Port",
+      "tasks": [
+        "Build think compilation pipeline: intent \u2192 Nex graph v2.0",
+        "Port core runtime to WASM (\u00c0\u1e63\u1eb9 layer)",
+        "Add 1000+ test scenarios",
+        "Formalize rewrite+merge convergence proof"
+      ],
+      "files_to_modify": [
+        "src/compiler/intent-to-graph.ts \u2014 Intent compilation",
+        "src/wasm/runtime.wasm.ts \u2014 WASM port",
+        "tests/ \u2014 1000+ scenarios"
+      ],
+      "deliverable": "think 'intent' compiles to executable graph; runtime runs in WASM"
+    }
+  },
+  "part_7_critical_dependencies": {
+    "dependencies": [
+      {
+        "dependency": "Guard conflict resolution",
+        "blocked_by": "Twelve-thrones consensus API",
+        "resolution": "Wrap ritual-router-v8-ADVANCED.ts as TS module"
+      },
+      {
+        "dependency": "Simulation eval",
+        "blocked_by": "Scarabswarm Julia bridge",
+        "resolution": "Build JSON bridge: julia --project=. -e 'run_sim(params); write(\"output.json\", results)'"
+      },
+      {
+        "dependency": "Payment eval",
+        "blocked_by": "AIO Move contract ABI",
+        "resolution": "Use Sui TS SDK to call entry functions"
+      },
+      {
+        "dependency": "Sensor eval",
+        "blocked_by": "Witness-firmware LoRa gateway",
+        "resolution": "\u2705 RESOLVED \u2014 Repo has witness_dashboard.py running at localhost:8888"
+      },
+      {
+        "dependency": "LARQL query",
+        "blocked_by": "ifascript LARQL branch merge",
+        "resolution": "Spawn Rust binary via child_process, parse JSON"
+      },
+      {
+        "dependency": "Temporal modulation",
+        "blocked_by": "Ritual-codex JSON loader",
+        "resolution": "Read json/sunday.json\u2026saturday.json directly"
+      },
+      {
+        "dependency": "DNA inheritance",
+        "blocked_by": "Bipon39 mnemonic API",
+        "resolution": "Compile Bipon39 to WASM with wasm-pack"
+      }
+    ]
+  },
+  "part_8_primitives_in_nex_terms": {
+    "primitives": [
+      {
+        "primitive": "birth",
+        "nex_equivalent": "spawn + Bipon39 DNA + ifascript Od\u00f9",
+        "flow": "Agent identity created \u2192 graph template assigned \u2192 enters ecosystem"
+      },
+      {
+        "primitive": "think",
+        "nex_equivalent": "compiler/intent-to-graph.ts + eval recursive execution",
+        "flow": "Intent parsed \u2192 graph compiled \u2192 gates checked \u2192 nodes evaluated \u2192 result merged"
+      },
+      {
+        "primitive": "act",
+        "nex_equivalent": "eval with Scarab/Witness/AIO bridges",
+        "flow": "Tool selected \u2192 simulation run \u2192 hardware engaged \u2192 payment escrowed \u2192 receipt generated"
+      }
+    ]
+  },
+  "part_9_integration_map": {
+    "ascii_diagram": "\n                    \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n                    \u2502   User Intent   \u2502\n                    \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n                             \u25bc\n                    \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n                    \u2502  compiler/intent\u2502 \u2190 think primitive\n                    \u2502   -to-graph.ts  \u2502\n                    \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n                             \u25bc\n              \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n              \u2502      Nex- Graph v2.0         \u2502\n              \u2502  \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510  \u2502\n              \u2502  \u2502 header:                \u2502  \u2502\n              \u2502  \u2502  agent_id (Bipon39)    \u2502  \u2502\n              \u2502  \u2502  od\u00f9_signature (If\u00e1)   \u2502  \u2502\n              \u2502  \u2502  temporal_state        \u2502  \u2502\n              \u2502  \u2502   (Ritual-codex)       \u2502  \u2502\n              \u2502  \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518  \u2502\n              \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n                       \u25bc\n              \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n              \u2502  7 Gates Check  \u2502 \u2190 Guard nodes\n              \u2502  (Twelve-thrones\u2502    consensus)\n              \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n                       \u25bc\n              \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n              \u2502   Execution     \u2502 \u2190 \u00d2g\u00fan runtime\n              \u2502  (interpreter)  \u2502\n              \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n                       \u25bc\n        \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n        \u25bc              \u25bc              \u25bc\n   \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510   \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510   \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n   \u2502  eval   \u2502   \u2502  query   \u2502   \u2502  spawn   \u2502\n   \u2502  hooks  \u2502   \u2502  (LARQL) \u2502   \u2502  (DNA)   \u2502\n   \u2514\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2518   \u2514\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2518   \u2514\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2518\n        \u2502             \u2502              \u2502\n   \u250c\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2510   \u250c\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2510   \u250c\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2510\n   \u2502Scarab   \u2502   \u2502ifascript \u2502   \u2502Bipon39   \u2502\n   \u2502sim      \u2502   \u2502LQL       \u2502   \u2502seed      \u2502\n   \u2502(Julia)  \u2502   \u2502(Rust)    \u2502   \u2502(Rust)    \u2502\n   \u2514\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2518   \u2514\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2518   \u2514\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2518\n        \u2502             \u2502              \u2502\n   \u250c\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2510   \u250c\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2510   \u250c\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2510\n   \u2502Witness  \u2502   \u2502Ritual-   \u2502   \u2502organism- \u2502\n   \u2502sensor   \u2502   \u2502codex     \u2502   \u2502core      \u2502\n   \u2502(Python) \u2502   \u2502(Julia)   \u2502   \u2502(TS)      \u2502\n   \u2514\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2518   \u2514\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2518   \u2514\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2518\n        \u2502             \u2502              \u2502\n        \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n                      \u25bc\n              \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n              \u2502  Merge + Receipt\u2502\n              \u2502  (Omo-Koda2     \u2502\n              \u2502   Merkle chain) \u2502\n              \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n                       \u25bc\n              \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n              \u2502  AIO Payment    \u2502 \u2190 \u1e62\u00e0ng\u00f3 escrow\n              \u2502  (Sui Move)     \u2502\n              \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n        "
+  },
+  "part_10_first_task": {
+    "description": "Week 1, Day 1 \u2014 Start Now",
+    "commands": "\n# 1. Clone all repos\ngit clone https://github.com/omo-koda/Nex-.git\ngit clone https://github.com/omo-koda/Omo-Koda2.git\ngit clone https://github.com/Bino-Elgua/Twelve-thrones.git\ngit clone https://github.com/omo-koda/ifascript.git\ngit clone https://github.com/omo-koda/Ritual-codex-Julia.git\ngit clone https://github.com/Bino-Elgua/Scarabswarm.git\ngit clone https://github.com/omo-koda/AIO.git\ngit clone https://github.com/omo-koda/Bipon39-Rust-.git\ngit clone https://github.com/omo-koda/organism-core.git\ngit clone https://github.com/omo-koda/vanity2.git\ngit clone https://github.com/Bino-Elgua/Omokoda.git\n\n# 2. Witness-firmware is private \u2014 use local copy\n#    (already on your machine at ~/Witness-firmware)\n\n# 3. Start Week 1\ncd Nex-\nmkdir -p src/{runtime,primitives,compiler,bridges,guards,wasm,types}\nmkdir -p tests/{unit,integration,scenarios}\nmkdir -p graphs/examples\n\n# 4. Create v2 schema\ncat > src/types/v2.ts << 'EOF'\nexport interface GraphHeader {\n  agent_id: string;\n  parent_hash: string;\n  od\u00f9_signature: string;\n  temporal_state: {\n    day: number;\n    resonance_signature: string;\n    hermetic_weight: number;\n  };\n  synapse_budget: number;\n  receipt_target: string;\n}\n\nexport interface NodeV2 {\n  id: string;\n  kind: 'goal' | 'agent' | 'memory' | 'tool' | 'guard' | 'rewrite' | 'reflect' | 'merge' | 'parallel' | 'query' | 'eval';\n  data: string | object;\n  orisha?: string;\n  hermetic?: string;\n  guard?: string;\n  od\u00f9_influence?: number;\n  larql?: boolean;\n  proof_required?: string;\n  consensus_threshold?: number;\n}\n\nexport interface LinkV2 {\n  from: string;\n  to: string;\n  type: 'sync' | 'async' | 'parallel' | 'depend' | 'conditional';\n}\n\nexport interface NexGraphV2 {\n  header: GraphHeader;\n  nodes: NodeV2[];\n  links: LinkV2[];\n  entry: string;\n  meta: {\n    graph_version: string;\n    compiler: string;\n    ecosystem: string;\n  };\n}\nEOF\n\n# 5. Build the first bridge: Bipon39 DNA\ncat > src/bridges/bipon39.ts << 'EOF'\nimport { spawn } from 'child_process';\nimport { promisify } from 'util';\n\nexport interface AgentDNA {\n  agent_id: string;\n  mnemonic: string;\n  od\u00f9_index: number;\n  dominant_orisha: string;\n  elemental_signature: Record<string, number>;\n  personality_summary: string;\n}\n\nexport class Bipon39Bridge {\n  private binaryPath: string;\n\n  constructor(binaryPath: string = './Bipon39-Rust-/target/release/bipon39') {\n    this.binaryPath = binaryPath;\n  }\n\n  async deriveIdentity(entropy: Buffer): Promise<AgentDNA> {\n    const mnemonic = await this.call('entropy_to_mnemonic', entropy.toString('hex'));\n    const profile = await this.call('inspect', mnemonic);\n    return {\n      agent_id: `0x${Buffer.from(mnemonic).toString('hex').slice(0, 40)}`,\n      mnemonic,\n      od\u00f9_index: profile.od\u00f9_index,\n      dominant_orisha: profile.dominant_orisha,\n      elemental_signature: profile.elements,\n      personality_summary: profile.summary,\n    };\n  }\n\n  private async call(command: string, ...args: string[]): Promise<any> {\n    return new Promise((resolve, reject) => {\n      const proc = spawn(this.binaryPath, [command, ...args]);\n      let output = '';\n      proc.stdout.on('data', (d) => { output += d; });\n      proc.on('close', (code) => {\n        if (code !== 0) reject(new Error(`Bipon39 exited ${code}`));\n        else resolve(JSON.parse(output));\n      });\n    });\n  }\n}\nEOF\n\necho \"Week 1 scaffold complete. Start building.\"\n        "
+  },
+  "bottom_line": {
+    "repo": "https://github.com/omo-koda/Nex-",
+    "role": "\u00d2g\u00fan \u2014 Execution / Forge \u2014 Tier 16384",
+    "language": "TypeScript (Bun)",
+    "current_state": "Graph runtime works, bootstrap debate executes, 7 primitives defined",
+    "whats_missing": "Ecosystem integration (12 repos), graph schema v2.0, guard formalization, simulation/hardware/payment bridges, WASM port",
+    "build_time": "4 weeks to production integration",
+    "first_task": "Create src/types/v2.ts + src/bridges/bipon39.ts + integrate Ritual-codex temporal state",
+    "critical_path": "Twelve-thrones API \u2192 guard conflict resolution \u2192 AIO escrow ABI \u2192 Scarab Julia bridge"
+  },
+  "standalone_product": {
+    "landing_page": "nex.run",
+    "what_it_does_alone": [
+      "Compile any intent into executable graph",
+      "Run graph with basic guards",
+      "Output result + receipt",
+      "API for developers to build their own agent systems"
+    ],
+    "pricing": {
+      "free": "100 graph executions/month",
+      "pro_49_mo": "10,000 executions, custom guards",
+      "enterprise_499_mo": "Unlimited, SLA, dedicated support"
+    },
+    "who_uses_it_alone": [
+      "AI startups building custom agent frameworks",
+      "DeFi protocols needing execution graphs",
+      "Game studios for NPC behavior trees"
+    ],
+    "standalone_code_example": "\nimport { Nex } from 'nex-runtime';\n\nconst nex = new Nex({ apiKey: 'nx_...' });\n\nconst graph = await nex.compile({\n  intent: \"optimize delivery route\",\n  guards: ['basic_safety']\n});\n\nconst result = await nex.execute(graph);\n// { output, receipt, execution_time }\n        "
+  },
+  "ecosystem_mode": {
+    "description": "Optional toggle to connect all 12 repos",
+    "code_example": "\n// Nex- standalone mode\nconst nex = new Nex({ apiKey: 'nx_...' });\n\n// Nex- ecosystem mode (connects to all 12)\nconst nex = new Nex({\n  apiKey: 'nx_...',\n  ecosystem: {\n    system: 'sys_...',      // Omo-Koda2\n    access: 'acc_...',       // Bipon39\n    history: 'his_...',     // Ritual-codex\n    policy: 'pol_...',       // Twelve-thrones\n    query: 'qry_...',        // ifascript\n    sync: 'syn_...',         // Scarabswarm\n    score: 'scr_...',        // AIO\n    spawn: 'spn_...',        // organism-core\n    sense: 'sns_...',        // Witness-firmware\n    compute: 'cmp_...',       // vanity2\n    interface: 'int_...'      // Omokoda\n  }\n});\n        ",
+    "when_on": "Nex- automatically routes identity through Access, queries temporal state from History, verifies guards through Policy, runs simulation through Sync, releases payment through Score, etc."
+  }
+}
+
+                                                                                       # NEX- FULL DEV HANDOFF
+## Ògún — Execution / Forge — Tier 16384
+
+**Repo:** https://github.com/omo-koda/Nex-  
+**Language:** TypeScript (Bun)  
+**Version:** 2.0  
+**Date:** 2026-05-29
+
+---
+
+## PART 1: CURRENT STATE (What Exists Now)
+
+### Existing Files
+
+| File | Status | Description |
+|------|--------|-------------|
+| `nex-runtime.ts` | ✅ | `NexInterpreter` class — recursive eval, link traversal |
+| `bootstrap.ts` | ✅ | Bootstrap executor — loads graph, validates, executes |
+| `bootstrap-2026-debate.json` | ✅ | Complete debate graph — 2 parallel agents + 1 critic + guards + merge |
+| `bootstrap-2026-debate-output.json` | ✅ | Generated output from execution |
+| `NEX_SEED_PROMPT_v1.1.md` | ✅ | Original seed prompt and lock-in axioms |
+
+### Current Graph Schema (v1.0)
+```json
+{
+  "nodes": [{"id", "kind", "data", "orisha", "hermetic", "note"}],
+  "links": [{"from", "to", "type"}],
+  "entry": "start_node_id",
+  "result": "optional_final_value",
+  "meta": {}
+}
+```
+
+- **Primitive Kinds:** `goal | agent | memory | tool | guard | rewrite | reflect | merge | parallel`
+- **Link Types:** `sync | async | parallel | depend`
+
+---
+
+## PART 2: THE 12-REPO ECOSYSTEM MAP
+
+### Dependencies (Directly Integrated Into Nex-)
+
+| # | Repo | Òrìṣà | Role in Nex- | Language | Integration Type | What Nex- Uses It For | Standalone vs Ecosystem |
+|---|------|-------|--------------|----------|------------------|----------------------|------------------------|
+| 1 | [Nex-](https://github.com/omo-koda/Nex-) | Ògún | Core graph runtime — execution engine | TypeScript/Bun | Core | Graph runtime, 7 primitives, recursive eval | Always on |
+| 2 | [Omo-Koda2](https://github.com/omo-koda/Omo-Koda2) | Ọmọ Kọ́dà | Steward dispatch, sandbox, receipt format, gate enforcement | Rust+Elixir+Go | Direct | Steward control, sandbox, receipt chain | Optional — adds security |
+| 3 | [Twelve-thrones](https://github.com/Bino-Elgua/Twelve-thrones) | Ọbàtálá | 12-model consensus, truth-density scoring for guard nodes | TypeScript+Move | Direct | Guard verification, truth-density | Optional — adds verification |
+| 4 | [ifascript](https://github.com/omo-koda/ifascript) | Ọ̀rúnmìlà | 256 Odù signatures, LARQL graph traversal for `query` nodes | Rust | Direct | 256 signature assignment, LARQL query | Optional — adds knowledge queries |
+| 5 | [Ritual-codex-Julia](https://github.com/omo-koda/Ritual-codex-Julia) | Ọ̀ṣun | 343 resonance signatures, temporal state modulation of graph execution | Julia+JS | Direct | Temporal modulation, resonance | Optional — adds time-awareness |
+| 6 | [Scarabswarm](https://github.com/Bino-Elgua/Scarabswarm) | Ọya | 6-DOF physics simulation, SHA256 trajectory proofs for `eval` nodes | Julia | Direct | Simulation eval, trajectory proofs | Optional — adds simulation |
+| 7 | [AIO](https://github.com/omo-koda/AIO) | Ṣàngó | Escrow lock, payment release, reputation update for payment nodes | Sui Move | Direct | Payment release, escrow, reputation | Optional — adds economics |
+| 8 | [Bipon39-Rust-](https://github.com/omo-koda/Bipon39-Rust-) | Èṣù | Agent DNA, personality profile, seed derivation for `spawn` primitive | Rust | Direct | Identity seed, DNA, spawn | Optional — adds identity |
+| 9 | [organism-core](https://github.com/omo-koda/organism-core) | Yemọja | 8-phase breath cycle, bridge wiring for ecosystem connectivity | TypeScript | Pattern | Lifecycle, breath cycle, bridges | Optional — adds lifecycle |
+| 10 | [Witness-firmware](https://github.com/Bino-Elgua/Witness-firmware) | Olókun | LoRa sensor data, gossip consensus for real-world `eval` nodes | MicroPython | Direct | Hardware sensor data, real-world eval | Optional — adds hardware |
+| 11 | [vanity2](https://github.com/omo-koda/vanity2) | Àṣẹ | CloakSeed cipher, secure identity, WASM portable modules for edge execution | TypeScript+WASM | Pattern | WASM portable, secure identity | Optional — adds portability |
+| 12 | [Omokoda](https://github.com/Bino-Elgua/Omokoda) | Bínò ÈL Guà / Human | Dashboard UI, 11-lobe polyphony, causal memory DAG | TypeScript+Rust+Move | Pattern | Visualization, human interface | Optional — adds visualization |
+
+### Pattern Sources (Inspiration Only — Merged Into Nex-)
+
+| Repo | Status |
+|------|--------|
+| [BikoDB](https://github.com/DioCrafts/BikoDB) | Study patterns only — not integrated |
+| [Swibe](https://github.com/Bino-Elgua/Swibe) | Patterns merged into Nex- compiler |
+| [vibe-lang](https://github.com/Bino-Elgua/vibe-lang) | Patterns merged into Nex- syntax |
+| [Aether](https://github.com/Bino-Elgua/Aether) | Patterns merged into Nex- marketplace |
+| [paradigm](https://github.com/Bino-Elgua/paradigm) | Patterns merged into guard reasoning |
+| [Claw-code](https://github.com/Bino-Elgua/Claw-code) | Patterns merged into runtime security |
+| [Swarmide2](https://github.com/Bino-Elgua/Swarmide2) | Patterns merged into organism-core |
+| [Droidclaw](https://github.com/Bino-Elgua/Droidclaw) | Merged into Witness-firmware |
+| [WorkMesh](https://github.com/Bino-Elgua/WorkMesh) | Merged into AIO |
+| [Techgnos-.EXE](https://github.com/omo-koda/Techgnos-.EXE) | Merged into Àṣẹ (vanity2) shrine overlay |
+| [Zangbeto](https://github.com/omo-koda/Zangbeto) | Merged into Twelve-thrones |
+| [Lattice-phase1](https://github.com/omo-koda/Lattice-phase1) | Standalone — not in 12 |
+
+---
+
+## PART 3: TARGET ARCHITECTURE
+
+### The Flow
+```
+User Intent → Nex- Graph Compilation → 7 Gates Check → Execution → Receipt → AIO Payment
+```
+
+### Target Graph Schema (v2.0)
+```json
+{
+  "header": {
+    "agent_id": "0x...",
+    "parent_hash": "0x...",
+    "odù_signature": "256-bit",
+    "temporal_state": {
+      "day": 3,
+      "resonance_signature": "Harmonious Mind of Ṣàngó",
+      "hermetic_weight": 0.87
+    },
+    "synapse_budget": 2400,
+    "receipt_target": "0x..."
+  },
+  "nodes": [
+    {
+      "id": "intent_parse",
+      "kind": "goal",
+      "data": "optimize delivery route for Block 7A",
+      "orisha": "Ọ̀rúnmìlà",
+      "hermetic": "Mentalism",
+      "guard": "truth_density > 0.75",
+      "odù_influence": 0.91
+    },
+    {
+      "id": "knowledge_query",
+      "kind": "query",
+      "data": "DESCRIBE block:7A WHERE traffic < threshold",
+      "orisha": "Ọ̀rúnmìlà",
+      "hermetic": "Correspondence",
+      "larql": true
+    },
+    {
+      "id": "route_compute",
+      "kind": "tool",
+      "data": "pathfinding_algorithm",
+      "orisha": "Ògún",
+      "hermetic": "Execution"
+    },
+    {
+      "id": "simulation_verify",
+      "kind": "eval",
+      "data": "scarab_simulation",
+      "orisha": "Ọya",
+      "hermetic": "Cause & Effect",
+      "proof_required": "sha256_trajectory"
+    },
+    {
+      "id": "truth_check",
+      "kind": "guard",
+      "data": "twelve_thrones_consensus",
+      "orisha": "Ọbàtálá",
+      "hermetic": "Polarity",
+      "consensus_threshold": 0.80
+    },
+    {
+      "id": "payment_release",
+      "kind": "tool",
+      "data": "aio_escrow_release",
+      "orisha": "Ṣàngó",
+      "hermetic": "Justice"
+    }
+  ],
+  "links": [
+    { "from": "intent_parse", "to": "knowledge_query", "type": "sync" },
+    { "from": "knowledge_query", "to": "route_compute", "type": "sync" },
+    { "from": "route_compute", "to": "simulation_verify", "type": "parallel" },
+    { "from": "simulation_verify", "to": "truth_check", "type": "sync" },
+    { "from": "truth_check", "to": "payment_release", "type": "sync" }
+  ],
+  "entry": "intent_parse",
+  "meta": {
+    "graph_version": "2.0",
+    "compiler": "Nex-v1.2",
+    "ecosystem": "Omo-koda-12"
+  }
+}
+```
+
+---
+
+## PART 4: THE 7 PRIMITIVES — BUILD SPEC
+
+| Primitive | Current State | What Needs Building | Integration Repo |
+|-----------|--------------|---------------------|------------------|
+| node | ✅ Basic kinds | Add `query` kind (LARQL), `eval` kind (Scarab sim, Witness sensor) | ifascript, Scarabswarm, Witness-firmware |
+| link | ✅ 4 types | Add `conditional` link type (guard-dependent routing) | Omo-Koda2 |
+| guard | ✅ Basic guard string | Formalize conflict resolution; integrate Twelve-thrones truth-density | Twelve-thrones, Omo-Koda2 |
+| spawn | ✅ Basic spawn | Inherit parent guards + Bipon39 DNA + temporal state | Bipon39, Ritual-codex |
+| rewrite | ✅ Basic rewrite | Prove convergence (mathematical); add stability metrics | Internal proof |
+| merge | ✅ Basic merge | Add consensus merge strategy (Twelve-thrones weighted vote) | Twelve-thrones |
+| eval | ✅ Basic eval | Add simulation eval (Scarab), hardware eval (Witness), payment eval (AIO) | Scarabswarm, Witness-firmware, AIO |
+
+---
+
+## PART 5: FILE STRUCTURE (TARGET)
+
+```
+Nex/
+├── src/
+│   ├── runtime/
+│   │   ├── interpreter.ts          ← was nex-runtime.ts
+│   │   ├── bootstrap.ts            ← entry point
+│   │   ├── header.ts               ← ecosystem header parser
+│   │   └── context.ts              ← temporal state + agent context
+│   │
+│   ├── primitives/
+│   │   ├── node.ts
+│   │   ├── link.ts
+│   │   ├── guard.ts                ← Twelve-thrones integration
+│   │   ├── spawn.ts                ← Bipon39 DNA inheritance
+│   │   ├── rewrite.ts
+│   │   ├── merge.ts                ← consensus strategies
+│   │   └── eval.ts                 ← Scarab/Witness/AIO hooks
+│   │
+│   ├── compiler/
+│   │   ├── intent-to-graph.ts      ← think primitive
+│   │   ├── odù-influence.ts        ← ifascript integration
+│   │   └── resonance-modulator.ts  ← Ritual-codex integration
+│   │
+│   ├── bridges/                    ← NEW: ecosystem bridges
+│   │   ├── omo-koda2.ts            ← Steward dispatch
+│   │   ├── twelve-thrones.ts       ← truth-density
+│   │   ├── ifascript.ts            ← LARQL query
+│   │   ├── scarabswarm.ts          ← simulation
+│   │   ├── witness-firmware.ts     ← sensor data
+│   │   ├── aio.ts                  ← escrow/payment
+│   │   ├── bipon39.ts              ← DNA/spawn
+│   │   └── ritual-codex.ts         ← temporal state
+│   │
+│   ├── guards/
+│   │   ├── truth-density.ts
+│   │   └── conflict-resolution.ts
+│   │
+│   ├── wasm/
+│   │   └── runtime.wasm.ts         ← Àṣẹ portable layer
+│   │
+│   └── types/
+│       ├── v1.ts                   ← current schema
+│       └── v2.ts                   ← target schema
+│
+├── tests/
+│   ├── unit/
+│   ├── integration/
+│   └── scenarios/                  ← 1000+ graphs
+│
+├── graphs/
+│   ├── bootstrap-2026-debate.json
+│   ├── bootstrap-2026-debate-output.json
+│   └── examples/                   ← v2.0 example graphs
+│
+├── docs/
+│   ├── NEX_SEED_PROMPT_v1.1.md
+│   ├── SPECIFICATION.md            ← generated by agents
+│   └── PHILOSOPHY.md
+│
+├── package.json
+├── tsconfig.json
+└── README.md
+```
+
+---
+
+## PART 6: 4-WEEK BUILD PLAN
+
+### WEEK 1: Schema v2.0 + Header Integration
+
+**Tasks:**
+1. Add `header` object to graph schema (agent_id, parent_hash, odù_signature, temporal_state, synapse_budget, receipt_target)
+2. Integrate Bipon39 seed derivation into `spawn` primitive
+3. Integrate Ritual-codex temporal state into graph execution context
+4. Add `query` node kind with LARQL flag
+
+**Files to modify:**
+- `src/runtime/interpreter.ts` — Add header parsing, temporal context injection
+- `src/runtime/bootstrap.ts` — Add header validation step
+- `src/types/v2.ts` — Graph schema v2.0 types
+- `src/primitives/spawn.ts` — Bipon39 DNA inheritance
+- `src/bridges/bipon39.ts` — DNA bridge wrapper
+- `src/bridges/ritual-codex.ts` — Temporal state bridge
+
+**Deliverable:** Graph compiles with full ecosystem header.
+
+---
+
+### WEEK 2: Guard Integration + Truth-Density
+
+**Tasks:**
+1. Integrate Twelve-thrones consensus into `guard` primitive
+2. Add truth-density scoring to all `eval` nodes
+3. Build guard conflict resolution algorithm
+4. Add `conditional` link type
+
+**Files to modify:**
+- `src/runtime/interpreter.ts` — Add guard resolution logic
+- `src/primitives/guard.ts` — Twelve-thrones integration
+- `src/primitives/link.ts` — Add conditional type
+- `src/guards/truth-density.ts` — Twelve-thrones integration
+- `src/guards/conflict-resolution.ts` — Formal algorithm
+- `src/bridges/twelve-thrones.ts` — Wrap ritual-router-v8
+
+**Deliverable:** Guards verify through 12-model consensus before graph continues.
+
+---
+
+### WEEK 3: Simulation + Hardware + Payment Integration
+
+**Tasks:**
+1. Integrate Scarabswarm simulation into `eval` nodes
+2. Integrate Witness-firmware sensor data ingestion
+3. Integrate AIO escrow into payment nodes
+4. Add SHA256 trajectory proof attachment
+
+**Files to modify:**
+- `src/runtime/interpreter.ts` — Add eval hooks for external systems
+- `src/primitives/eval.ts` — Scarab/Witness/AIO hooks
+- `src/bridges/scarabswarm.ts` — Julia JSON bridge
+- `src/bridges/witness-firmware.ts` — Sensor data bridge
+- `src/bridges/aio.ts` — Payment bridge
+
+**Deliverable:** Full `act` primitive executes through simulation, hardware, and payment.
+
+---
+
+### WEEK 4: Compilation Pipeline + WASM Port
+
+**Tasks:**
+1. Build `think` compilation pipeline: intent → Nex graph v2.0
+2. Port core runtime to WASM (Àṣẹ layer)
+3. Add 1000+ test scenarios
+4. Formalize rewrite+merge convergence proof
+
+**Files to modify:**
+- `src/compiler/intent-to-graph.ts` — Intent compilation
+- `src/wasm/runtime.wasm.ts` — WASM port
+- `tests/` — 1000+ scenarios
+
+**Deliverable:** `think "intent"` compiles to executable graph; runtime runs in WASM.
+
+---
+
+## PART 7: CRITICAL DEPENDENCIES & RESOLUTION
+
+| Dependency | Blocked By | Resolution |
+|------------|-----------|------------|
+| Guard conflict resolution | Twelve-thrones consensus API | Wrap `ritual-router-v8-ADVANCED.ts` as TS module |
+| Simulation eval | Scarabswarm Julia bridge | Build JSON bridge: `julia --project=. -e 'run_sim(params); write("output.json", results)'` |
+| Payment eval | AIO Move contract ABI | Use Sui TS SDK to call entry functions |
+| Sensor eval | Witness-firmware LoRa gateway | ✅ RESOLVED — Repo has `witness_dashboard.py` running at `localhost:8888` |
+| LARQL query | ifascript LARQL branch merge | Spawn Rust binary via `child_process`, parse JSON |
+| Temporal modulation | Ritual-codex JSON loader | Read `json/sunday.json…saturday.json` directly |
+| DNA inheritance | Bipon39 mnemonic API | Compile Bipon39 to WASM with `wasm-pack` |
+
+---
+
+## PART 8: THE 3 PRIMITIVES IN NEX- TERMS
+
+| Primitive | Nex- Equivalent | Flow |
+|-----------|----------------|------|
+| birth | `spawn` + Bipon39 DNA + ifascript Odù | Agent identity created → graph template assigned → enters ecosystem |
+| think | `compiler/intent-to-graph.ts` + `eval` recursive execution | Intent parsed → graph compiled → gates checked → nodes evaluated → result merged |
+| act | `eval` with Scarab/Witness/AIO bridges | Tool selected → simulation run → hardware engaged → payment escrowed → receipt generated |
+
+---
+
+## PART 9: INTEGRATION MAP (FINAL)
+
+```
+                    ┌─────────────────┐
+                    │   User Intent   │
+                    └────────┬────────┘
+                             ▼
+                    ┌─────────────────┐
+                    │  compiler/intent│ ← think primitive
+                    │   -to-graph.ts  │
+                    └────────┬────────┘
+                             ▼
+              ┌──────────────────────────────┐
+              │      Nex- Graph v2.0         │
+              │  ┌────────────────────────┐  │
+              │  │ header:                │  │
+              │  │  agent_id (Bipon39)    │  │
+              │  │  odù_signature (Ifá)   │  │
+              │  │  temporal_state        │  │
+              │  │   (Ritual-codex)       │  │
+              │  └────────────────────────┘  │
+              └────────┬─────────────────────┘
+                       ▼
+              ┌─────────────────┐
+              │  7 Gates Check  │ ← Guard nodes
+              │  (Twelve-thrones│    consensus)
+              └────────┬────────┘
+                       ▼
+              ┌─────────────────┐
+              │   Execution     │ ← Ògún runtime
+              │  (interpreter)  │
+              └────────┬────────┘
+                       ▼
+        ┌──────────────┼──────────────┐
+        ▼              ▼              ▼
+   ┌─────────┐   ┌──────────┐   ┌──────────┐
+   │  eval   │   │  query   │   │  spawn   │
+   │  hooks  │   │  (LARQL) │   │  (DNA)   │
+   └────┬────┘   └────┬─────┘   └────┬─────┘
+        │             │              │
+   ┌────┴────┐   ┌────┴─────┐   ┌────┴─────┐
+   │Scarab   │   │ifascript │   │Bipon39   │
+   │sim      │   │LQL       │   │seed      │
+   │(Julia)  │   │(Rust)    │   │(Rust)    │
+   └────┬────┘   └────┬─────┘   └────┬─────┘
+        │             │              │
+   ┌────┴────┐   ┌────┴─────┐   ┌────┴─────┐
+   │Witness  │   │Ritual-   │   │organism- │
+   │sensor   │   │codex     │   │core      │
+   │(Python) │   │(Julia)   │   │(TS)      │
+   └────┬────┘   └────┬─────┘   └────┬─────┘
+        │             │              │
+        └─────────────┼──────────────┘
+                      ▼
+              ┌─────────────────┐
+              │  Merge + Receipt│
+              │  (Omo-Koda2     │
+              │   Merkle chain) │
+              └────────┬────────┘
+                       ▼
+              ┌─────────────────┐
+              │  AIO Payment    │ ← Ṣàngó escrow
+              │  (Sui Move)     │
+              └─────────────────┘
+```
+
+---
+
+## PART 10: FIRST TASK — START NOW
+
+### Week 1, Day 1:
+
+```bash
+# 1. Clone all repos
+git clone https://github.com/omo-koda/Nex-.git
+git clone https://github.com/omo-koda/Omo-Koda2.git
+git clone https://github.com/Bino-Elgua/Twelve-thrones.git
+git clone https://github.com/omo-koda/ifascript.git
+git clone https://github.com/omo-koda/Ritual-codex-Julia.git
+git clone https://github.com/Bino-Elgua/Scarabswarm.git
+git clone https://github.com/omo-koda/AIO.git
+git clone https://github.com/omo-koda/Bipon39-Rust-.git
+git clone https://github.com/omo-koda/organism-core.git
+git clone https://github.com/omo-koda/vanity2.git
+git clone https://github.com/Bino-Elgua/Omokoda.git
+
+# 2. Witness-firmware is private — use local copy
+#    (already on your machine at ~/Witness-firmware)
+
+# 3. Start Week 1
+cd Nex-
+mkdir -p src/{runtime,primitives,compiler,bridges,guards,wasm,types}
+mkdir -p tests/{unit,integration,scenarios}
+mkdir -p graphs/examples
+
+# 4. Create v2 schema
+cat > src/types/v2.ts << 'EOF'
+export interface GraphHeader {
+  agent_id: string;
+  parent_hash: string;
+  odù_signature: string;
+  temporal_state: {
+    day: number;
+    resonance_signature: string;
+    hermetic_weight: number;
+  };
+  synapse_budget: number;
+  receipt_target: string;
+}
+
+export interface NodeV2 {
+  id: string;
+  kind: 'goal' | 'agent' | 'memory' | 'tool' | 'guard' | 'rewrite' | 'reflect' | 'merge' | 'parallel' | 'query' | 'eval';
+  data: string | object;
+  orisha?: string;
+  hermetic?: string;
+  guard?: string;
+  odù_influence?: number;
+  larql?: boolean;
+  proof_required?: string;
+  consensus_threshold?: number;
+}
+
+export interface LinkV2 {
+  from: string;
+  to: string;
+  type: 'sync' | 'async' | 'parallel' | 'depend' | 'conditional';
+}
+
+export interface NexGraphV2 {
+  header: GraphHeader;
+  nodes: NodeV2[];
+  links: LinkV2[];
+  entry: string;
+  meta: {
+    graph_version: string;
+    compiler: string;
+    ecosystem: string;
+  };
+}
+EOF
+
+# 5. Build the first bridge: Bipon39 DNA
+cat > src/bridges/bipon39.ts << 'EOF'
+import { spawn } from 'child_process';
+import { promisify } from 'util';
+
+export interface AgentDNA {
+  agent_id: string;
+  mnemonic: string;
+  odù_index: number;
+  dominant_orisha: string;
+  elemental_signature: Record<string, number>;
+  personality_summary: string;
+}
+
+export class Bipon39Bridge {
+  private binaryPath: string;
+
+  constructor(binaryPath: string = './Bipon39-Rust-/target/release/bipon39') {
+    this.binaryPath = binaryPath;
+  }
+
+  async deriveIdentity(entropy: Buffer): Promise<AgentDNA> {
+    const mnemonic = await this.call('entropy_to_mnemonic', entropy.toString('hex'));
+    const profile = await this.call('inspect', mnemonic);
+    return {
+      agent_id: `0x${Buffer.from(mnemonic).toString('hex').slice(0, 40)}`,
+      mnemonic,
+      odù_index: profile.odù_index,
+      dominant_orisha: profile.dominant_orisha,
+      elemental_signature: profile.elements,
+      personality_summary: profile.summary,
+    };
+  }
+
+  private async call(command: string, ...args: string[]): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const proc = spawn(this.binaryPath, [command, ...args]);
+      let output = '';
+      proc.stdout.on('data', (d) => { output += d; });
+      proc.on('close', (code) => {
+        if (code !== 0) reject(new Error(`Bipon39 exited ${code}`));
+        else resolve(JSON.parse(output));
+      });
+    });
+  }
+}
+EOF
+
+echo "Week 1 scaffold complete. Start building."
+```
+
+---
+
+## STANDALONE PRODUCT SPEC
+
+### Nex- as Standalone SaaS
+
+**Product:** Nex- Graph Runtime  
+**Landing page:** nex.run
+
+**What it does without ecosystem:**
+- Compile any intent into executable graph
+- Run graph with basic guards
+- Output result + receipt
+- API for developers to build their own agent systems
+
+**Pricing:**
+- **Free:** 100 graph executions/month
+- **Pro ($49/mo):** 10,000 executions, custom guards
+- **Enterprise ($499/mo):** Unlimited, SLA, dedicated support
+
+**Who uses it alone:**
+- AI startups building custom agent frameworks
+- DeFi protocols needing execution graphs
+- Game studios for NPC behavior trees
+
+**Standalone code example:**
+```typescript
+import { Nex } from 'nex-runtime';
+
+const nex = new Nex({ apiKey: 'nx_...' });
+
+const graph = await nex.compile({
+  intent: "optimize delivery route",
+  guards: ['basic_safety']
+});
+
+const result = await nex.execute(graph);
+// { output, receipt, execution_time }
+```
+
+---
+
+## ECOSYSTEM MODE
+
+**Optional toggle to connect all 12 repos:**
+
+```typescript
+// Nex- standalone mode
+const nex = new Nex({ apiKey: 'nx_...' });
+
+// Nex- ecosystem mode (connects to all 12)
+const nex = new Nex({
+  apiKey: 'nx_...',
+  ecosystem: {
+    system: 'sys_...',      // Omo-Koda2
+    access: 'acc_...',       // Bipon39
+    history: 'his_...',     // Ritual-codex
+    policy: 'pol_...',       // Twelve-thrones
+    query: 'qry_...',        // ifascript
+    sync: 'syn_...',         // Scarabswarm
+    score: 'scr_...',        // AIO
+    spawn: 'spn_...',        // organism-core
+    sense: 'sns_...',        // Witness-firmware
+    compute: 'cmp_...',       // vanity2
+    interface: 'int_...'      // Omokoda
+  }
+});
+```
+
+When ecosystem mode is on, Nex- automatically:
+- Routes identity through Access
+- Queries temporal state from History
+- Verifies guards through Policy
+- Runs simulation through Sync
+- Releases payment through Score
+- etc.
+
+---
+
+## BOTTOM LINE
+
+| Question | Answer |
+|----------|--------|
+| **Repo** | https://github.com/omo-koda/Nex- |
+| **Role** | Ògún — Execution / Forge — Tier 16384 |
+| **Language** | TypeScript (Bun) |
+| **Current state** | Graph runtime works, bootstrap debate executes, 7 primitives defined |
+| **What's missing** | Ecosystem integration (12 repos), graph schema v2.0, guard formalization, simulation/hardware/payment bridges, WASM port |
+| **Build time** | 4 weeks to production integration |
+| **First task** | Create `src/types/v2.ts` + `src/bridges/bipon39.ts` + integrate Ritual-codex temporal state |
+| **Critical path** | Twelve-thrones API → guard conflict resolution → AIO escrow ABI → Scarab Julia bridge |
+
+All 12 repos are verified. Witness-firmware is resolved. Start Week 1 now.
+
+**Àṣẹ.** 🔥
+
+I'll synthesize everything from our conversation into a comprehensive dev handoff for Nex-. Let me organize this systematically.
+
+---
+
+Nex-: Full Dev Handoff Document
+
+1. Identity & Positioning
+
+Attribute	Value	
+Name	Nex-	
+Archetype	Ògún (Execution / Forge / Run)	
+Universal Dashboard Label	Execute	
+Role in Ecosystem	Backend Execution Engine / Runtime Orchestrator	
+Type	Standalone SaaS + Ecosystem Backbone	
+Language	TypeScript (per memory: TS/action)	
+
+One-liner: Nex- is the execution runtime that runs graphs, executes primitives, and orchestrates all 12 repos in the Omo-koda ecosystem.
+
+---
+
+2. What Nex- Is (vs. What It Isn't)
+
+Nex- IS	Nex- IS NOT	
+Backend runtime engine	A UI/dashboard (that's Ọ̀rí Dashboard)	
+Graph executor	A database (that's LARQL / Ọ̀rúnmìlà)	
+Primitive executor (birth/think/act)	A memory system (that's Ritual-codex-Julia / Ọ̀ṣun)	
+Cross-repo orchestrator	A single-repo tool (it connects all 12)	
+API-first service	A hardware interface (that's Witness-firmware)	
+Standalone sellable product	Dependent on the full ecosystem to function	
+
+Critical boundary: Nex- connects to the Ọ̀rí Dashboard via API. The dashboard visualizes what Nex- is doing. Nex- never renders UI. The dashboard never executes logic.
+
+---
+
+3. Core Responsibilities
+
+3.1 Primary Functions
+
+1. Graph Execution
+   - Parses and runs computational/ritual graphs
+   - Handles graph traversal, node execution, and edge routing
+   - Supports conditional branching, loops, and parallel execution
+   - Graphs define workflows across the 12-repo ecosystem
+
+2. Primitive Execution
+   - Birth — Spawns new agents, initializes contexts, creates identities
+   - Think — Routes reasoning tasks to appropriate cognitive repos (Ritual-codex-Julia, Scarabswarm, etc.)
+   - Act — Executes side effects: API calls, state mutations, external integrations, hardware triggers
+
+3. Cross-Repo Orchestration
+   - Maintains active connections to all 12 repos
+   - Routes requests to the correct repo based on graph node type
+   - Handles repo health checks, failover, and load balancing
+   - Manages inter-repo data flow and serialization
+
+4. Runtime Management
+   - Process lifecycle: spawn, monitor, kill, restart
+   - Resource allocation and throttling
+   - Queue management for async tasks
+   - Execution logging and telemetry
+
+3.2 Secondary Functions
+
+- API Gateway — Unified entry point for external systems to trigger executions
+- Event Bus — Publishes execution events that other repos can subscribe to
+- Scheduling — Time-based and trigger-based execution of graphs
+- Sandboxing — Isolated execution environments for untrusted code/graphs
+
+---
+
+4. Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        EXTERNAL CLIENTS                      │
+│    (Ọ̀rí Dashboard, CLI tools, Third-party integrations)      │
+└──────────────────────────┬──────────────────────────────────┘
+                           │ API (REST / WebSocket / gRPC)
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│                         NEX- ENGINE                            │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
+│  │   Graph     │  │  Primitive  │  │   Orchestration     │  │
+│  │  Parser &   │  │  Executor   │  │      Layer          │  │
+│  │   Runtime   │  │(birth/think/│  │ (repo routing,      │  │
+│  │             │  │    act)     │  │  health, failover)  │  │
+│  └─────────────┘  └─────────────┘  └─────────────────────┘  │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
+│  │   Event     │  │   Queue &   │  │   Sandbox /         │  │
+│  │    Bus      │  │  Scheduler  │  │   Isolation         │  │
+│  └─────────────┘  └─────────────┘  └─────────────────────┘  │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+        ┌──────────────────┼──────────────────┐
+        ▼                  ▼                  ▼
+   ┌─────────┐      ┌─────────┐      ┌─────────────┐
+   │  REPO   │      │  REPO   │      │    REPO     │
+   │CONNECTORS│      │CONNECTORS│      │  CONNECTORS  │
+   │(all 12) │      │(all 12) │      │   (all 12)   │
+   └─────────┘      └─────────┘      └─────────────┘
+```
+
+---
+
+5. The 12 Repo Connections
+
+Nex- must maintain connectors for each repo. Here's the mapping:
+
+#	Repo	Archetype	Language	Function	Nex- Connector Role	
+1	Omo-Koda2	Agent/Kernel	Rust	Core kernel, agent identity	Spawn agents, manage kernel state	
+2	Ritual-codex-Julia	Resonance/Memory	Julia	Memory, history, embeddings	Store/retrieve execution context	
+3	organism-core	Creation/Flow	Elixir	Swarm intelligence	Distribute tasks to swarm nodes	
+4	Twelve-thrones	Wisdom/Balance	TS	Truth/consensus layer	Validate execution results	
+5	ifascript	Oracle/Pattern	Rust+LARQL	Oracle, model-as-DB	Query oracle for decision points	
+6	Nex-	Execution/Forge	TS	This repo	Self-orchestration, meta-execution	
+7	Scarabswarm	Transformation/Wind	Julia	Simulation	Run sims before live execution	
+8	AIO	Power/Vital Force	Move	Work economy, state funding	Handle payments for execution	
+9	Bipon39	Depth/Secrets	Rust	Identity, cryptography	Sign and verify execution payloads	
+10	vanity2	Gatekeeper/Trickster	TS+WASM	Portable runtime	Execute WASM modules in graphs	
+11	Witness-firmware	Human/Architect	MicroPython	Hardware interface	Trigger hardware actions	
+12	Omokoda	Network/Interface	TS	UI/human layer	Send events to dashboard	
+
+Each connector must:
+- Support health checks (heartbeat)
+- Handle authentication/authorization
+- Serialize/deserialize repo-specific data formats
+- Implement circuit breaker pattern for resilience
+- Expose metrics for monitoring
+
+---
+
+6. The 3 Primitives: Deep Spec
+
+6.1 BIRTH
+Purpose: Create new execution contexts
+
+Inputs:
+- `agent_type`: Which archetype/template to instantiate
+- `context`: Initial state, permissions, resource limits
+- `parent_id`: Optional parent for hierarchical spawning
+- `graph_id`: Which graph this agent will execute
+
+Outputs:
+- `agent_id`: Unique identifier
+- `signature`: Cryptographic identity (from Bipon39)
+- `state`: Initialized state object
+
+Side Effects:
+- Registers agent in Omo-Koda2 kernel
+- Allocates resources
+- Creates audit trail in Ritual-codex-Julia
+
+---
+
+6.2 THINK
+Purpose: Route reasoning/computation tasks
+
+Inputs:
+- `agent_id`: Who is thinking
+- `query`: The reasoning task or question
+- `mode`: `oracle` (ifascript), `swarm` (organism-core), `simulate` (Scarabswarm), `embed` (Ritual-codex-Julia)
+
+Outputs:
+- `result`: Computed answer or decision
+- `confidence`: Certainty score
+- `trace`: Reasoning path for audit
+
+Behavior:
+- Routes to appropriate repo based on `mode`
+- Can chain multiple thinking steps
+- Supports speculative execution (run multiple paths, pick best)
+
+---
+
+6.3 ACT
+Purpose: Execute side effects in the world
+
+Inputs:
+- `agent_id`: Who is acting
+- `action_type`: `api_call`, `state_mutate`, `hardware_trigger`, `payment`, `message`
+- `payload`: Action-specific data
+- `confirmation`: Required for irreversible actions
+
+Outputs:
+- `receipt`: Proof of execution
+- `new_state`: Updated state
+- `events`: Published to event bus
+
+Safety:
+- Sandbox for untrusted code
+- Confirmation gates for destructive actions
+- Rate limiting per agent
+
+---
+
+7. Graph Execution Engine
+
+7.1 Graph Structure
+
+```typescript
+interface Graph {
+  id: string;
+  version: string;
+  nodes: Node[];
+  edges: Edge[];
+  metadata: {
+    author: string;
+    created: timestamp;
+    tags: string[];
+  };
+}
+
+interface Node {
+  id: string;
+  type: 'birth' | 'think' | 'act' | 'condition' | 'loop' | 'parallel' | 'subgraph';
+  config: Record<string, any>;
+  repo_target?: string; // Which repo to delegate to
+  timeout_ms: number;
+  retry_policy: RetryPolicy;
+}
+
+interface Edge {
+  from: string;
+  to: string;
+  condition?: string; // Conditional routing expression
+  weight?: number; // For probabilistic routing
+}
+```
+
+7.2 Execution Modes
+- Synchronous — Block until complete, return full result
+- Asynchronous — Submit job, return job_id, poll or webhook
+- Streaming — Real-time output as nodes complete (WebSocket)
+- Scheduled — Execute at specific time or on trigger
+
+---
+
+8. API Surface
+
+8.1 REST Endpoints
+
+Method	Endpoint	Description	
+POST	`/v1/graphs`	Submit a graph for execution	
+GET	`/v1/graphs/:id`	Get execution status/result	
+DELETE	`/v1/graphs/:id`	Cancel running execution	
+POST	`/v1/primitives/birth`	Execute birth primitive	
+POST	`/v1/primitives/think`	Execute think primitive	
+POST	`/v1/primitives/act`	Execute act primitive	
+GET	`/v1/agents`	List active agents	
+GET	`/v1/agents/:id`	Get agent state	
+POST	`/v1/agents/:id/kill`	Terminate agent	
+GET	`/v1/repos/health`	Health check all repo connectors	
+GET	`/v1/metrics`	Execution metrics	
+POST	`/v1/webhooks`	Register webhook for events	
+
+8.2 WebSocket Events (Real-time)
+
+Event	Direction	Payload	
+`execution.started`	Server → Client	`{graph_id, agent_id, timestamp}`	
+`execution.node_complete`	Server → Client	`{node_id, result, elapsed_ms}`	
+`execution.completed`	Server → Client	`{graph_id, final_state, receipt}`	
+`execution.failed`	Server → Client	`{graph_id, node_id, error, retryable}`	
+`agent.spawned`	Server → Client	`{agent_id, type, parent_id}`	
+`agent.died`	Server → Client	`{agent_id, reason, exit_code}`	
+`repo.disconnected`	Server → Client	`{repo_name, last_seen, reconnecting}`	
+
+---
+
+9. Standalone Product Strategy
+
+Nex- must be sellable on its own. Here's the positioning:
+
+9.1 Standalone Value Proposition
+
+> "Nex- is a universal execution engine for distributed systems. Define your logic as graphs, execute primitives across any backend, and orchestrate heterogeneous services — whether you use our ecosystem or not."
+
+9.2 Target Customers (Standalone)
+- DevOps teams — Orchestrate microservices with visual graphs
+- AI/ML engineers — Run inference pipelines across multiple models
+- IoT developers — Execute device command chains
+- Blockchain projects — Run multi-step smart contract interactions
+- SaaS builders — Workflow automation backend
+
+9.3 Pricing Tiers (Suggested)
+
+Tier	Price	Limits	
+Free	0	100 graph executions/month, 3 repos, community support	
+Pro	49/mo	10,000 executions, 10 repos, priority support	
+Enterprise	Custom	Unlimited, custom connectors, SLA, dedicated infra	
+
+9.4 Landing Page Requirements
+- Hero: "Execute Anything. Connect Everything."
+- Demo video: Show a graph executing across 3 different repos
+- Code snippet: Submit a graph via API in 5 lines
+- Use cases: AI pipelines, IoT automation, microservice orchestration
+- Pricing table
+- Docs link
+- "Built for the Omo-koda ecosystem, works with anything" badge
+
+---
+
+10. Integration with the 7 Hermetic Principles
+
+The 7 Hermetic principles are executable gates in Nex-:
+
+Principle	Gate Function in Nex-	
+Mentalism	Graph validation — "All is mind" → graph must be logically sound before execution	
+Correspondence	Cross-repo mapping — "As above, so below" → data transforms between repo formats	
+Vibration	Event bus — "Everything vibrates" → real-time event streaming	
+Polarity	Conditional routing — "Everything has opposites" → if/else branches in graphs	
+Rhythm	Scheduling — "Everything flows" → cron, triggers, rate limiting	
+Cause & Effect	Audit trail — "Every cause has its effect" → immutable execution logs	
+Gender	Birth primitive — "Everything has masculine/feminine" → agent creation requires both template (masculine/structure) and context (feminine/nurture)	
+
+---
+
+11. The 343 Resonance Signatures
+
+Nex- must support 343 unique execution signatures derived from:
+- 7 days × 7 planets × 7 dimensions = 343
+
+Implementation:
+- Each graph execution generates a `resonance_signature` hash
+- Signature = `hash(day_of_week + planet_alignment + dimensional_layer + graph_id + agent_id)`
+- Used for:
+  - Execution audit trails
+  - Deterministic replay (same signature = same conditions)
+  - Access control (certain signatures require higher clearance)
+  - The Ọ̀rí Dashboard displays signatures in the "Ledger" view
+
+---
+
+12. Build Phases Integration
+
+Nex- maps to the Action phase of the 4-phase build:
+
+Phase	Repo/System	Nex- Role	
+Foundation	Omo-Koda2, Bipon39	Kernel and identity setup	
+Mind	Ritual-codex-Julia, ifascript, Twelve-thrones	Thinking and validation	
+Action	Nex-	Execution and orchestration	
+World	Ọ̀rí Dashboard, Omokoda	Visualization and human interaction	
+
+---
+
+13. Tech Stack
+
+Layer	Technology	
+Runtime	Node.js / Deno (TypeScript)	
+Graph Engine	Custom DAG executor	
+API	Fastify or similar	
+WebSocket	ws or Socket.io	
+Queue	BullMQ (Redis) or NATS	
+Sandbox	VM2 or isolated-vm for untrusted code	
+Observability	OpenTelemetry, Prometheus	
+Testing	Vitest	
+Packaging	Docker, npm	
+
+---
+
+14. File Structure (Proposed)
+
+```
+nex-/
+├── src/
+│   ├── engine/
+│   │   ├── graph-parser.ts
+│   │   ├── graph-executor.ts
+│   │   ├── node-runners/
+│   │   │   ├── birth.ts
+│   │   │   ├── think.ts
+│   │   │   ├── act.ts
+│   │   │   ├── condition.ts
+│   │   │   ├── loop.ts
+│   │   │   ├── parallel.ts
+│   │   │   └── subgraph.ts
+│   │   └── scheduler.ts
+│   ├── connectors/
+│   │   ├── base-connector.ts
+│   │   ├── omo-koda2.ts
+│   │   ├── ritual-codex-julia.ts
+│   │   ├── organism-core.ts
+│   │   ├── twelve-thrones.ts
+│   │   ├── ifascript.ts
+│   │   ├── scarabswarm.ts
+│   │   ├── aio.ts
+│   │   ├── bipon39.ts
+│   │   ├── vanity2.ts
+│   │   ├── witness-firmware.ts
+│   │   └── omokoda.ts
+│   ├── primitives/
+│   │   ├── birth.ts
+│   │   ├── think.ts
+│   │   └── act.ts
+│   ├── api/
+│   │   ├── rest/
+│   │   │   ├── routes/
+│   │   │   └── middleware/
+│   │   └── websocket/
+│   │       └── events.ts
+│   ├── sandbox/
+│   │   └── isolate.ts
+│   ├── events/
+│   │   └── bus.ts
+│   ├── telemetry/
+│   │   └── metrics.ts
+│   └── types/
+│       └── index.ts
+├── tests/
+├── docs/
+├── landing-page/          # Standalone marketing site
+├── docker/
+├── package.json
+└── README.md
+```
+
+---
+
+15. Critical Decisions Needed
+
+#	Decision	Options	Recommendation	
+1	Runtime	Node.js vs Deno vs Bun	Deno — native TS, sandboxing, security	
+2	Queue	Redis/BullMQ vs NATS vs RabbitMQ	NATS — built-in streaming, better for distributed	
+3	Graph DSL	JSON vs YAML vs custom	JSON for API, YAML for human-written graphs	
+4	Sandbox	VM2 vs isolated-vm vs WebContainers	isolated-vm — V8 isolates, secure	
+5	Auth	JWT vs API keys vs both	Both — JWT for dashboard, API keys for integrations	
+6	Scaling	Vertical vs horizontal	Horizontal from day 1 — stateless design	
+
+---
+
+16. Success Metrics
+
+Metric	Target	
+Graph execution latency (p99)	< 500ms for simple graphs	
+Concurrent graph executions	10,000+	
+Repo connector uptime	99.99%	
+Primitive execution success rate	99.9%	
+Time to add new repo connector	< 2 days	
+Standalone customer acquisition	100 paying customers in 6 months	
+
+---
+
+17. Next Steps (Prioritized)
+
+1. Bootstrap repo — TypeScript, Deno, testing framework
+2. Build graph parser — DAG validation, cycle detection
+3. Implement 3 primitives — Birth, Think, Act with mock repo connectors
+4. Build REST API — Core endpoints for graph submission and status
+5. Add WebSocket layer — Real-time execution streaming
+6. Build first real connector — Start with Omo-Koda2 (kernel)
+7. Add sandboxing — Secure execution of untrusted graph nodes
+8. Write landing page — Next.js or similar, deploy to Vercel
+9. Integration test — End-to-end graph execution across 3 repos
+10. Beta release — Invite 10 standalone users
+
+---
+
+18. Yoruba Canonical Truth (Internal Only)
+
+> For initiates only — never expose in dashboard or public docs
+
+- Nex- is the Ògún principle made executable
+- Ògún clears the path — Nex- clears execution paths
+- The forge is where raw material becomes tool — Nex- transforms graph definitions into running processes
+- Ògún's machete cuts through obstacles — Nex-'s circuit breaker cuts through failing repos
+- The 7 tools of Ògún map to the 7 node types in the graph engine
+
+This truth lives in internal code comments, private documentation, and the Book. The public face uses universal terminology only.
+
+---
+
+This is your complete handoff. Every decision, boundary, and requirement from our conversation is captured here. 
+
+What do you want to drill deeper into — the graph engine internals, the connector architecture, the standalone pricing model, or start building?
+
+Yes — absolutely. As a standalone execution engine, Nex- is designed to integrate with any external system that needs orchestration. Hermes Agent, OpenClaw, OpenHuman, and similar frameworks are ideal integration targets because they solve adjacent problems that Nex- doesn't compete with.
+
+Here's the strategic breakdown:
+
+---
+
+Why These Integrations Make Sense
+
+External System	What They Do	What Nex- Adds	Synergy	
+Hermes Agent	Autonomous agent reasoning, planning, multi-step task decomposition	Reliable execution layer — Hermes plans, Nex- runs the plan as a graph across distributed backends	Hermes becomes the "brain," Nex- becomes the "nervous system"	
+OpenClaw	Open-source tool-use framework for LLMs, function calling	Graph orchestration — OpenClaw calls tools; Nex- sequences those calls into workflows with state, retry, and cross-service routing	OpenClac handles which tool, Nex- handles how it executes in production	
+OpenHuman	Human-in-the-loop interfaces, approvals, feedback collection	Action execution with confirmation gates — OpenHuman pauses for human input; Nex- resumes execution, routes the approved action to the right repo, and logs the result	Human judgment + machine reliability	
+
+---
+
+The Core Pitch for Each Integration
+
+Hermes Agent
+
+> "Hermes thinks. Nex- executes. You get autonomous agents that don't just plan — they actually run their plans across your entire infrastructure, with audit trails, rollback, and resilience built in."
+
+Integration point: Hermes outputs a task graph → Nex- ingests it as a `subgraph` node type → executes across connected repos → returns results to Hermes for next planning iteration.
+
+OpenClaw
+
+> "OpenClaw gives your LLM 100 tools. Nex- turns those tool calls into production-grade workflows — with queues, sandboxing, and the ability to chain 50 tool calls across 5 different services without dropping state."
+
+Integration point: OpenClaw's tool registry maps to Nex- repo connectors. Each "tool" becomes a node in a Nex- graph. OpenClaw's function-calling API becomes a thin wrapper around Nex- graph submission.
+
+OpenHuman
+
+> "OpenHuman asks the human. Nex- acts on the answer. Build approval workflows where human judgment triggers complex, multi-system executions with full accountability."
+
+Integration point: Nex- graph includes `human_approval` node type → pauses execution → OpenHuman UI renders the question → human responds → Nex- receives webhook → resumes graph.
+
+---
+
+Standalone Value Proposition (Expanded)
+
+These integrations make Nex- more valuable as a standalone product because:
+
+Without Integrations	With Integrations	
+"Yet another workflow engine"	"The execution layer that connects to the agent frameworks you already use"	
+Competes with Temporal, Airflow	Complements Hermes, OpenClaw, OpenHuman — different layer	
+Requires users to learn new graph DSL	Meets users where they are — ingest their existing plans/task lists	
+Sells on features	Sells on interoperability	
+
+---
+
+Technical Integration Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│              EXTERNAL AGENT FRAMEWORKS                        │
+│    (Hermes Agent, OpenClaw, OpenHuman, AutoGPT, etc.)        │
+└──────────────────────────┬──────────────────────────────────┘
+                           │ Submit plan / task graph / approval
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│                         NEX-                                  │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
+│  │  Adapter    │  │   Graph     │  │   Execution         │  │
+│  │  Layer      │  │   Ingestion │  │   Engine            │  │
+│  │             │  │             │  │                     │  │
+│  │ • Hermes    │  │ • Convert   │  │ • Run across        │  │
+│  │   plan →    │  │   external  │  │   all 12 repos      │  │
+│  │   subgraph  │  │   formats   │  │ • Return results    │  │
+│  │ • OpenClaw  │  │   to Nex-   │  │   to caller         │  │
+│  │   tool →    │  │   graph     │  │                     │  │
+│  │   node      │  │             │  │                     │  │
+│  │ • OpenHuman │  │             │  │                     │  │
+│  │   approval  │  │             │  │                     │  │
+│  │   → gate    │  │             │  │                     │  │
+│  └─────────────┘  └─────────────┘  └─────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+Adapter Layer Spec (What You'd Build)
+
+Hermes Adapter
+
+```typescript
+// Hermes submits a plan
+interface HermesPlan {
+  objective: string;
+  steps: {
+    id: string;
+    action: string;
+    dependencies: string[];
+    expected_outcome: string;
+  }[];
+}
+
+// Nex- converts to internal graph
+function hermesToNex(plan: HermesPlan): Graph {
+  return {
+    id: generateId(),
+    nodes: plan.steps.map(step => ({
+      id: step.id,
+      type: 'think', // or 'act' based on action type
+      config: { objective: step.action },
+      // ... map dependencies to edges
+    }))
+  };
+}
+```
+
+OpenClaw Adapter
+
+```typescript
+// OpenClaw tool call
+interface OpenClawToolCall {
+  tool: string;
+  parameters: Record<string, any>;
+  callback_url: string;
+}
+
+// Maps to Nex- act node targeting the right repo connector
+function openClawToNex(call: OpenClawToolCall): Node {
+  return {
+    id: generateId(),
+    type: 'act',
+    repo_target: mapToolToRepo(call.tool), // e.g., "bipon39" for crypto tools
+    config: call.parameters,
+    callback: call.callback_url
+  };
+}
+```
+
+OpenHuman Adapter
+
+```typescript
+// Nex- graph pauses at human gate
+interface HumanGateNode {
+  type: 'human_approval';
+  config: {
+    question: string;
+    options: string[];
+    timeout_ms: number;
+    fallback_action: string;
+  };
+}
+
+// Execution pauses, OpenHuman renders UI
+// Human responds via webhook → Nex- resumes
+```
+
+---
+
+Business Impact
+
+Integration	Revenue Model	Why It Works	
+Hermes	Nex- as "execution add-on" for Hermes deployments	Hermes users need reliability; Nex- charges per execution	
+OpenClaw	Nex- as "production tier" for OpenClaw users	Free tier uses OpenClaw direct; paid tier routes through Nex- for scale	
+OpenHuman	Nex- + OpenHuman bundled for regulated industries	Finance, healthcare need human-in-the-loop + audit trails	
+
+---
+
+Competitive Positioning
+
+Competitor	Their Layer	Nex-'s Layer	Integration Strategy	
+Temporal	Durable execution	Graph orchestration + repo abstraction	Nex- can submit to Temporal as a repo connector	
+Airflow	Batch scheduling	Real-time + agent-driven execution	Co-exist: Airflow for ETL, Nex- for agent workflows	
+LangChain	LLM chaining	Backend execution	LangChain plans → Nex- executes	
+CrewAI	Multi-agent coordination	Cross-repo orchestration	CrewAI assigns agents → Nex- runs them	
+
+Key insight: Nex- doesn't replace these. It sits below them as the execution runtime they can delegate to when they need to go beyond their own sandbox.
+
+---
+
+Recommended Priority
+
+1. OpenClaw first — Easiest integration (tool → node mapping is 1:1), largest open-source community, immediate standalone credibility
+2. Hermes second — Deeper integration, more complex, but higher-value enterprise deals
+3. OpenHuman third — Regulatory/compliance angle, slower sales cycle but sticky contracts
+
+---
+
+One-Liner for Landing Page
+
+> "Nex- executes the plans your agents make. Plug in Hermes, OpenClaw, OpenHuman, or any framework — we run the graph, you get the results."
+I understand now. Each repo is a standalone product with its own landing page, pricing, and users — AND they all plug into the bigger ecosystem. Let me redesign the architecture.
+
+---
+
+The New Architecture: 12 Standalone Products + 1 Ecosystem
+
+Each repo is a separate SaaS/tool/framework that can be used alone or connected.
+
+#	Repo	Standalone Product	What Users Pay For	Landing Page	
+1	Nex-	Nex- Graph Runtime — Agent execution engine	Per graph execution, per node, enterprise licensing	nex.run	
+2	Omo-Koda2	System OS — Sovereign agent kernel	Per agent spawned, infrastructure hosting	system.omo	
+3	Bipon39	Access Identity — Mnemonic + DNA engine	Per identity created, enterprise key management	access.omo	
+4	ifascript	Query Oracle — LARQL knowledge graph	Per query, per graph traversal, API calls	query.omo	
+5	Ritual-codex	History Temporal — Time-state engine	Per temporal computation, calendar API	history.omo	
+6	Twelve-thrones	Policy Consensus — Truth verification	Per consensus check, per model, API calls	policy.omo	
+7	Scarabswarm	Sync Simulation — Physics training ground	Per simulation hour, per trajectory proof	sync.omo	
+8	AIO	Score Economy — Escrow + reputation	Transaction fees, staking, treasury mgmt	score.omo	
+9	organism-core	Spawn Lifecycle — Agent orchestration	Per agent lifecycle managed, bridge connections	spawn.omo	
+10	Witness-firmware	Sense Hardware — Sensor mesh	Per sensor node, per data packet, mesh hosting	sense.omo	
+11	vanity2	Compute Portable — WASM sandbox + identity	Per WASM execution, per cloak, edge compute	compute.omo	
+12	Omokoda	Interface Dashboard — Ọ̀rí Hive	Per seat, per dashboard, white-label	interface.omo	
+
+---
+
+How Each Repo Stands Alone
+
+Example: Nex- as Standalone SaaS
+
+Product: Nex- Graph Runtime
+
+Landing page: nex.run
+
+What it does without ecosystem:
+- Compile any intent into executable graph
+- Run graph with basic guards
+- Output result + receipt
+- API for developers to build their own agent systems
+
+Pricing:
+- Free: 100 graph executions/month
+- Pro (49/mo): 10,000 executions, custom guards
+- Enterprise (499/mo): Unlimited, SLA, dedicated support
+
+Who uses it alone:
+- AI startups building custom agent frameworks
+- DeFi protocols needing execution graphs
+- Game studios for NPC behavior trees
+
+Code example (standalone):
+
+```typescript
+import { Nex } from 'nex-runtime';
+
+const nex = new Nex({ apiKey: 'nx_...' });
+
+const graph = await nex.compile({
+  intent: "optimize delivery route",
+  guards: ['basic_safety']
+});
+
+const result = await nex.execute(graph);
+// { output, receipt, execution_time }
+```
+
+---
+
+Example: Twelve-thrones as Standalone API
+
+Product: Policy Consensus Engine
+
+Landing page: policy.omo
+
+What it does without ecosystem:
+- Submit any claim, get 12-model consensus
+- Truth-density score (0-1)
+- Epistemic mapping visualization
+- API for fact-checking, content moderation, research verification
+
+Pricing:
+- Free: 100 consensus checks/month
+- Pro (99/mo): 10,000 checks, custom models
+- Enterprise (999/mo): Unlimited, custom model training, private deployment
+
+Who uses it alone:
+- News organizations for fact-checking
+- Social media platforms for content moderation
+- Research institutions for peer review automation
+
+Code example (standalone):
+
+```typescript
+import { Policy } from 'policy-consensus';
+
+const policy = new Policy({ apiKey: 'pol_...' });
+
+const result = await policy.verify({
+  claim: "Bitcoin halving occurred April 2024",
+  models: ['claude', 'gpt4', 'gemini', 'llama3']
+});
+// { consensus: 0.97, truth_density: 0.94, dissenting_models: [] }
+```
+
+---
+
+Example: Scarabswarm as Standalone Simulation
+
+Product: Sync Simulation Platform
+
+Landing page: sync.omo
+
+What it does without ecosystem:
+- Upload drone/agent design
+- Run 6-DOF physics simulation
+- Generate SHA256 trajectory proof
+- Export training data for real-world deployment
+
+Pricing:
+- Free: 10 simulation hours/month
+- Pro (199/mo): 1,000 hours, multi-drone swarm
+- Enterprise (1,999/mo): Unlimited, custom physics, HPC cluster
+
+Who uses it alone:
+- Drone manufacturers testing flight paths
+- Robotics companies training autonomous vehicles
+- Logistics companies optimizing delivery routes
+
+---
+
+How They Connect Into Ecosystem (Optional)
+
+Each standalone product has an ecosystem mode toggle:
+
+```typescript
+// Nex- standalone mode
+const nex = new Nex({ apiKey: 'nx_...' });
+
+// Nex- ecosystem mode (connects to all 12)
+const nex = new Nex({
+  apiKey: 'nx_...',
+  ecosystem: {
+    system: 'sys_...',      // Omo-Koda2
+    access: 'acc_...',       // Bipon39
+    history: 'his_...',     // Ritual-codex
+    policy: 'pol_...',       // Twelve-thrones
+    query: 'qry_...',        // ifascript
+    sync: 'syn_...',         // Scarabswarm
+    score: 'scr_...',        // AIO
+    spawn: 'spn_...',        // organism-core
+    sense: 'sns_...',        // Witness-firmware
+    compute: 'cmp_...',       // vanity2
+    interface: 'int_...'      // Omokoda
+  }
+});
+```
+
+When ecosystem mode is on, Nex- automatically:
+- Routes identity through Access
+- Queries temporal state from History
+- Verifies guards through Policy
+- Runs simulation through Sync
+- Releases payment through Score
+- etc.
+
+---
+
+The Ọ̀rí Dashboard as Ecosystem Glue
+
+Ọ̀rí Dashboard (interface.omo) is the optional ecosystem view that shows all 12 products connected.
+
+What it does:
+- Single login for all 12 products
+- Unified billing across all 12
+- Cross-product analytics
+- Ecosystem-wide agent lifecycle view
+
+Who pays for it:
+- Enterprises using 3+ products
+- Power users managing agent fleets
+- Developers building on the full stack
+
+Pricing:
+- Free: View-only dashboard for 1 product
+- Pro (99/mo): Dashboard for up to 5 products, cross-analytics
+- Enterprise (999/mo): All 12 products, unified billing, white-label
+
+---
+
+Landing Page Structure (All 12)
+
+Each landing page follows the same template:
+
+```
+[product].omo or [product].run
+├── /                    ← Hero: What this product does
+├── /features            ← Feature grid with screenshots
+├── /pricing             ← 3-tier pricing (Free/Pro/Enterprise)
+├── /docs                ← API documentation
+├── /playground          ← Try it without signing up
+├── /ecosystem           ← "Works with Omo-koda ecosystem" (optional upsell)
+└── /login               ← Dashboard access
+```
+
+---
+
+Revenue Model Per Repo
+
+Repo	Standalone Revenue	Ecosystem Revenue	
+Nex-	Per execution	+20% when part of ecosystem bundle	
+System	Per agent spawned	+15% ecosystem hosting fee	
+Access	Per identity	+10% cross-identity verification	
+Query	Per query	+25% when chained with other products	
+History	Per computation	+10% temporal modulation fee	
+Policy	Per consensus	+20% multi-product truth networks	
+Sync	Per sim hour	+15% ecosystem training credits	
+Score	Transaction fees	+5% ecosystem treasury mgmt	
+Spawn	Per lifecycle	+10% bridge connection fees	
+Sense	Per sensor node	+15% mesh expansion incentives	
+Compute	Per WASM exec	+10% edge compute pooling	
+Interface	Per seat	+30% white-label ecosystem view	
+
+---
+
+What Changes in the Build Plan
+
+Before (Monolithic)
+Build Nex- → connect all 12 → build dashboard on top
+
+After (Standalone Products)
+Build each repo as standalone SaaS → add ecosystem API → build Ọ̀rí Dashboard as optional glue
+
+Phase	What You Build	Deliverable	
+1	Nex- standalone SaaS + landing page	nex.run live with pricing	
+2	System standalone + landing page	system.omo live	
+3	Access standalone + landing page	access.omo live	
+4	Query standalone + landing page	query.omo live	
+5	History standalone + landing page	history.omo live	
+6	Policy standalone + landing page	policy.omo live	
+7	Sync standalone + landing page	sync.omo live	
+8	Score standalone + landing page	score.omo live	
+9	Spawn standalone + landing page	spawn.omo live	
+10	Sense standalone + landing page	sense.omo live	
+11	Compute standalone + landing page	compute.omo live	
+12	Interface dashboard + ecosystem glue	interface.omo live	
+
+Each phase is a revenue event. Not just one launch at the end.
+
+---
+
+Bottom Line
+
+Question	Answer	
+Is each repo standalone?	Yes. Each is its own SaaS/product.	
+Can someone use just Nex-?	Yes. Pay per execution. No ecosystem needed.	
+Can someone use just Policy?	Yes. Pay per consensus check. Standalone API.	
+How do they connect?	Optional ecosystem mode toggle. API keys for each.	
+What is Ọ̀rí Dashboard?	Optional ecosystem view. Not required for any product.	
+Who pays for dashboard?	Enterprises using 3+ products. Power users.	
+Revenue model?	Each product monetizes independently + ecosystem bundle upsell.	
+
+Build Nex- as a standalone product first. Launch nex.run. Get paying customers. Then build the next product.
+
+Àṣẹ. 🔥
+NEX- DEV HANDOFF — COMPLETE BLUEPRINT
+
+Repo: https://github.com/omo-koda/Nex-
+
+Universal Archetype: Execution / Forge
+
+Dashboard Word: Run
+
+Canonical: Ògún
+
+Language: TypeScript (Bun runtime)
+
+Tier: 16384
+
+---
+
+WHAT NEX- ACTUALLY IS
+
+Nex- is a graph-based computation runtime where agents compile intent into executable graphs of nodes, links, guards, rewrites, spawns, merges, and evaluations. It is the execution engine for the entire 12-archetype system. Every `Process` and `Execute` primitive compiles to a Nex- graph, passes through the 7 gates, and produces a verifiable result.
+
+Current state: Graph runtime works. Bootstrap debate executes. 7 primitives defined. Missing: Ecosystem integration, schema v2.0, guard formalization, simulation/hardware/payment bridges, WASM port.
+
+---
+
+THE 12 REPOS INTEGRATED INTO NEX-
+
+#	Repo Link	Universal Archetype	Dashboard Word	Integration Type	What We Use It For	
+1	https://github.com/omo-koda/Nex-	Execution / Forge	Run	Core	Graph runtime, 7 primitives, recursive eval, link traversal	
+2	https://github.com/omo-koda/Omo-Koda2	Agent / Kernel	System	Direct Integration	Steward dispatch, sandbox, receipt format, 7-gate enforcement	
+3	https://github.com/omo-koda/Bipon39-Rust-	Gatekeeper / Seer	Access	Direct Integration	Agent DNA seed, personality profile, mnemonic derivation, `Spawn` inheritance	
+4	https://github.com/omo-koda/ifascript	Oracle / Pattern	Query	Direct Integration	256 signature assignment, LARQL graph traversal, `Query` node kind	
+5	https://github.com/omo-koda/Ritual-codex-Julia	Resonance / Memory	History	Direct Integration	343 temporal signatures, temporal state modulation, graph weighting	
+6	https://github.com/Bino-Elgua/Twelve-thrones	Wisdom / Balance	Policy	Direct Integration	12-model consensus, truth-density scoring, `Guard` verification	
+7	https://github.com/Bino-Elgua/Scarabswarm	Transformation / Wind	Sync	Direct Integration	6-DOF physics simulation, SHA256 trajectory proofs, `Eval` verification	
+8	https://github.com/omo-koda/AIO	Justice / Thunder	Score	Direct Integration	Escrow lock, payment release, reputation update, `Eval` economic finalization	
+9	https://github.com/omo-koda/organism-core	Creation / Flow	Spawn	Pattern Integration	8-phase breath cycle, bridge wiring, lifecycle orchestration	
+10	https://github.com/Bino-Elgua/Witness-firmware	Depth / Secrets	Sense	Direct Integration	LoRa sensor data, gossip consensus, physical-world `Eval` input	
+11	https://github.com/omo-koda/vanity2	Power / Vital Force	Compute	Pattern Integration	CloakSeed cipher, secure identity, WASM portable execution	
+12	https://github.com/Bino-Elgua/Omokoda	Human / Architect	Interface	Pattern Integration	Ọ̀rí Hive dashboard UI, 11-lobe polyphony, causal memory DAG	
+
+---
+
+INTEGRATION TYPE DEFINITIONS
+
+Type	Meaning	Repos	
+Direct Integration	Nex- calls this repo's API/runtime directly during graph execution	Omo-Koda2, Bipon39, ifascript, Ritual-codex, Twelve-thrones, Scarabswarm, AIO, Witness-firmware	
+Pattern Integration	Concepts/patterns from this repo are ported into Nex- codebase	organism-core, vanity2, Omokoda	
+
+---
+
+WHAT EACH REPO PROVIDES NEX- (Specific Functions)
+
+1. NEX- (Core) — https://github.com/omo-koda/Nex-
+
+What it provides itself:
+- `NexInterpreter` class — recursive graph evaluation
+- 7 primitives: `node`, `link`, `guard`, `spawn`, `rewrite`, `merge`, `eval`
+- 4 link types: `sync`, `async`, `parallel`, `depend`
+- 9 node kinds: `goal`, `agent`, `memory`, `tool`, `guard`, `rewrite`, `reflect`, `merge`, `parallel`
+- Bootstrap executor — loads JSON graph, validates, executes
+- Graph schema v1.0 (current)
+
+What needs building:
+- Graph schema v2.0 with ecosystem header
+- `query` node kind (LARQL integration)
+- `conditional` link type (guard-dependent routing)
+- Formal guard conflict resolution
+- Rewrite convergence proof
+- WASM port
+- 1000+ test scenarios
+
+---
+
+2. OMO-KODA2 (System) — https://github.com/omo-koda/Omo-Koda2
+
+Integration type: Direct
+
+What we use:
+- Steward dispatch — Every Nex- graph execution request routes through Omo-Koda2's `Steward::dispatch()`
+- Sandbox — WASI sandbox for `eval` node execution
+- 7-gate enforcement — Before Nex- executes, all 7 gates evaluate the operation
+- Receipt format — Merkle receipt structure that Nex- `eval` nodes produce
+- Identity resolution — Wallet/seed verification for graph header
+
+How it connects:
+
+```typescript
+// Nex- calls Omo-Koda2 before execution
+const steward = new StewardBridge();
+const approved = await steward.evaluate(graph, context);
+if (!approved) throw new GateHaltError(receipt);
+```
+
+Code to port: `src/runtime/interpreter.ts` — add `steward.evaluate()` call before recursive eval
+
+---
+
+3. BIPON39 (Access) — https://github.com/omo-koda/Bipon39-Rust-
+
+Integration type: Direct
+
+What we use:
+- Mnemonic seed — Generates agent identity from BIP-39 entropy
+- Personality profile — Derives agent traits from seed
+- DNA fingerprint — Unique agent identifier for graph header
+- Parent inheritance — `spawn` primitive copies parent DNA + mutates
+
+How it connects:
+
+```typescript
+// In spawn primitive
+const seed = await bipon39.generate();
+const dna = await bipon39.deriveProfile(seed);
+const signature = await ifascript.assign(seed); // chained
+```
+
+Code to port: `src/primitives/spawn.ts` — add Bipon39 seed generation + DNA derivation
+
+---
+
+4. IFASCRIPT (Query) — https://github.com/omo-koda/ifascript
+
+Integration type: Direct
+
+What we use:
+- 256 signature assignment — Each agent gets deterministic signature at birth
+- LARQL graph traversal — `Query` node kind uses LQL for knowledge inspection
+- Knowledge divination — `DESCRIBE`, `SELECT`, `WALK` on agent memory graph
+- Signature influence — Signature modulates node behavior
+
+How it connects:
+
+```typescript
+// New query node kind
+const queryNode = {
+  id: "knowledge_query",
+  kind: "query",
+  data: "DESCRIBE block:7A WHERE traffic < threshold",
+  larql: true,
+  signature: agent.signature
+};
+```
+
+Code to port: `src/primitives/node.ts` — add `query` kind; `src/compiler/intent-to-graph.ts` — compile intent to LARQL query
+
+---
+
+5. RITUAL-CODEX-JULIA (History) — https://github.com/omo-koda/Ritual-codex-Julia
+
+Integration type: Direct
+
+What we use:
+- 343 temporal signatures — (7 days × 7 planets × 7 dimensions) modulate graph execution
+- Temporal state — Current day affects gate strictness, memory weighting, execution priority
+- BTC Time — Bitcoin block height as immutable time anchor
+- Spiral Calendar — Long-term temporal cycles
+
+How it connects:
+
+```typescript
+// Graph header includes temporal state
+const temporalState = await ritualCodex.getCurrentState();
+graph.header.temporal_state = {
+  day: temporalState.day,
+  signature: temporalState.signature,
+  weight: temporalState.influence
+};
+// Modulates edge weights at runtime
+```
+
+Code to port: `src/runtime/context.ts` — add temporal state injection; `src/compiler/resonance-modulator.ts` — modulate graph weights
+
+---
+
+6. TWELVE-THRONES (Policy) — https://github.com/Bino-Elgua/Twelve-thrones
+
+Integration type: Direct
+
+What we use:
+- 12-model consensus — Guard nodes verify agent output through 12 parallel evaluations
+- Truth-density scoring — Numerical score (0-1) for each claim
+- Weighted disagreement — Consensus threshold for guard passage
+- Epistemic mapping — Visual truth network
+
+How it connects:
+
+```typescript
+// Guard primitive calls Twelve-thrones
+const guard = {
+  id: "truth_check",
+  kind: "guard",
+  data: "twelve_thrones_consensus",
+  consensus_threshold: 0.80
+};
+// Execution pauses until 12 models agree
+```
+
+Code to port: `src/primitives/guard.ts` — add Twelve-thrones API call; `src/guards/truth-density.ts` — truth-density scoring
+
+---
+
+7. SCARABSWARM (Sync) — https://github.com/Bino-Elgua/Scarabswarm
+
+Integration type: Direct
+
+What we use:
+- 6-DOF physics simulation — Drone physics for `eval` of physical actions
+- SHA256 trajectory proofs — Cryptographic proof of simulation path
+- Swarm coordination — Multi-agent simulation
+- Training ground — Agents train before real-world deployment
+
+How it connects:
+
+```typescript
+// Eval node for physical actions
+const evalNode = {
+  id: "simulation_verify",
+  kind: "eval",
+  data: "scarab_simulation",
+  proof_required: "sha256_trajectory"
+};
+// Runs in Julia, returns proof + result
+```
+
+Code to port: `src/eval/scarab-bridge.ts` — JSON bridge to Julia simulation
+
+---
+
+8. AIO (Score) — https://github.com/omo-koda/AIO
+
+Integration type: Direct
+
+What we use:
+- Escrow lock — Before `act` execution, payment locked
+- Payment release — After successful `eval` + receipt, payment released
+- Reputation update — Agent score changes based on work quality
+- Move contracts — On-chain anchoring of receipts
+
+How it connects:
+
+```typescript
+// Payment node in graph
+const paymentNode = {
+  id: "payment_release",
+  kind: "tool",
+  data: "aio_escrow_release",
+  amount: graph.header.credits_budget
+};
+// Triggered after truth_check passes
+```
+
+Code to port: `src/eval/aio-bridge.ts` — Move contract ABI integration
+
+---
+
+9. ORGANISM-CORE (Spawn) — https://github.com/omo-koda/organism-core
+
+Integration type: Pattern
+
+What we extract:
+- 8-phase breath cycle — Agent lifecycle rhythm (inhale, hold, exhale, pause, etc.)
+- 4 bridge modules — `birth-ifa-swibe`, `rlm-osovm`, `toc-evolve-hook`, `zangbeto-audit`
+- Ecosystem wiring — How repos connect in sequence
+
+How it ports into Nex-:
+
+```typescript
+// Breath cycle integrated into graph execution
+const breathCycle = {
+  inhale: "load context",
+  hold: "execute nodes",
+  exhale: "produce output",
+  pause: "wait for next cycle"
+};
+// Graph execution follows this rhythm
+```
+
+Code to port: `src/runtime/context.ts` — add breath cycle phase tracking
+
+---
+
+10. WITNESS-FIRMWARE (Sense) — https://github.com/Bino-Elgua/Witness-firmware
+
+Integration type: Direct
+
+What we use:
+- LoRa sensor data — Real-world sensor input for `eval` nodes
+- Gossip consensus — 3-node mesh verification of sensor data
+- Physics-proof attestation — SHA256 + RSSI + timestamp = unforgeable proof
+- OTA updates — Remote firmware updates via gossip
+
+How it connects:
+
+```typescript
+// Eval node for real-world data
+const sensorNode = {
+  id: "sensor_input",
+  kind: "eval",
+  data: "witness_sensor",
+  sensor_type: "temperature",
+  location: "block_7a"
+};
+// Ingests LoRa mesh data, returns attested value
+```
+
+Code to port: `src/eval/witness-bridge.ts` — LoRa gateway API integration
+
+---
+
+11. VANITY2 (Compute) — https://github.com/omo-koda/vanity2
+
+Integration type: Pattern
+
+What we extract:
+- CloakSeed cipher — Secure identity cloaking for agent graphs
+- 6-chain vanity — Multi-chain address generation
+- PoisonRadar — Security scanning patterns
+- WASM portable modules — Edge execution sandbox
+
+How it ports into Nex-:
+
+```typescript
+// Agent identity cloaking in graph header
+const cloakedId = await vanity2.cloak(agent.wallet);
+graph.header.agent_id = cloakedId;
+// WASM module for edge execution
+const wasmModule = await vanity2.compileToWasm(graph);
+```
+
+Code to port: `src/wasm/runtime.wasm.ts` — WASM compilation using vanity2 patterns
+
+---
+
+12. OMOKODA (Interface) — https://github.com/Bino-Elgua/Omokoda
+
+Integration type: Pattern
+
+What we extract:
+- 11-lobe polyphony — Multi-model reasoning architecture
+- Causal memory DAG — Memory as directed acyclic graph
+- RLM (Recursive Language Model) — Depth tracking for reasoning
+- Twelfth Face timeout — Processing limit mechanism
+- Sui Soul contract — On-chain agent identity
+
+How it ports into Nex-:
+
+```typescript
+// RLM depth tracking in graph execution
+const rlmDepth = {
+  current: 0,
+  max: 11, // 11 lobes
+  timeout: "twelfth_face" // halt at depth 12
+};
+// Causal memory for graph nodes
+const causalLink = {
+  from: "node_a",
+  to: "node_b",
+  cause: "data_flow",
+  timestamp: blockHeight
+};
+```
+
+Code to port: `src/runtime/interpreter.ts` — add RLM depth tracking; `src/types/v2.ts` — add causal link structure
+
+---
+
+THE 7 PRIMITIVES — CURRENT VS. TARGET
+
+Primitive	Current State	What Needs Building	Integration Source	
+node	9 kinds	Add `query` kind (LARQL)	ifascript	
+link	4 types	Add `conditional` type (guard-dependent)	Omo-Koda2	
+guard	Basic string	Formalize conflict resolution + truth-density	Twelve-thrones	
+spawn	Basic spawn	Inherit DNA + temporal state + parent guards	Bipon39 + Ritual-codex	
+rewrite	Basic rewrite	Prove convergence (mathematical)	Internal	
+merge	Basic merge	Add consensus merge (weighted vote)	Twelve-thrones	
+eval	Basic eval	Add simulation/hardware/payment hooks	Scarabswarm + Witness + AIO	
+
+---
+
+GRAPH SCHEMA V2.0 (Target)
+
+```json
+{
+  "header": {
+    "agent_id": "cloaked_0x...",
+    "parent_hash": "0x...",
+    "signature": "256-bit",
+    "temporal_state": {
+      "day": 3,
+      "resonance": "signature_name",
+      "weight": 0.87
+    },
+    "credits_budget": 2400,
+    "receipt_target": "0x...",
+    "rlm_depth": 0
+  },
+  "nodes": [
+    {
+      "id": "intent_parse",
+      "kind": "goal",
+      "data": "optimize delivery route",
+      "archetype": "Oracle",
+      "gate": "Mentalism",
+      "signature_influence": 0.91
+    },
+    {
+      "id": "knowledge_query",
+      "kind": "query",
+      "data": "DESCRIBE block:7A",
+      "archetype": "Oracle",
+      "gate": "Correspondence",
+      "larql": true
+    },
+    {
+      "id": "route_compute",
+      "kind": "tool",
+      "data": "pathfinding",
+      "archetype": "Execution",
+      "gate": "Execution"
+    },
+    {
+      "id": "simulation_verify",
+      "kind": "eval",
+      "data": "scarab_sim",
+      "archetype": "Transformation",
+      "gate": "Cause & Effect",
+      "proof": "sha256_required"
+    },
+    {
+      "id": "truth_check",
+      "kind": "guard",
+      "data": "twelve_thrones",
+      "archetype": "Wisdom",
+      "gate": "Polarity",
+      "threshold": 0.80
+    },
+    {
+      "id": "payment_release",
+      "kind": "tool",
+      "data": "aio_escrow",
+      "archetype": "Justice",
+      "gate": "Justice"
+    }
+  ],
+  "links": [
+    { "from": "intent_parse", "to": "knowledge_query", "type": "sync" },
+    { "from": "knowledge_query", "to": "route_compute", "type": "sync" },
+    { "from": "route_compute", "to": "simulation_verify", "type": "parallel" },
+    { "from": "simulation_verify", "to": "truth_check", "type": "conditional" },
+    { "from": "truth_check", "to": "payment_release", "type": "sync" }
+  ],
+  "entry": "intent_parse",
+  "meta": {
+    "version": "2.0",
+    "compiler": "Nex-v1.2",
+    "ecosystem": "Omo-koda-12"
+  }
+}
+```
+
+---
+
+FILE STRUCTURE (Target)
+
+```
+Nex/
+├── src/
+│   ├── runtime/
+│   │   ├── interpreter.ts          ← recursive eval (was nex-runtime.ts)
+│   │   ├── bootstrap.ts            ← entry point
+│   │   ├── header.ts               ← ecosystem header parser
+│   │   ├── context.ts              ← temporal state + breath cycle + RLM
+│   │   └── causal.ts               ← causal memory DAG
+│   │
+│   ├── primitives/
+│   │   ├── node.ts                 ← add query kind
+│   │   ├── link.ts                 ← add conditional type
+│   │   ├── guard.ts                ← Twelve-thrones integration
+│   │   ├── spawn.ts                ← Bipon39 DNA + temporal inheritance
+│   │   ├── rewrite.ts              ← convergence proof
+│   │   ├── merge.ts                ← consensus strategies
+│   │   └── eval.ts                 ← Scarab/Witness/AIO hooks
+│   │
+│   ├── compiler/
+│   │   ├── intent-to-graph.ts      ← Process primitive
+│   │   ├── signature-influence.ts   ← ifascript integration
+│   │   └── resonance-modulator.ts   ← Ritual-codex integration
+│   │
+│   ├── bridges/
+│   │   ├── omo-koda2.ts            ← System dispatch
+│   │   ├── twelve-thrones.ts       ← Policy verification
+│   │   ├── ifascript.ts            ← Query/LARQL
+│   │   ├── scarabswarm.ts          ← Simulation
+│   │   ├── witness-firmware.ts     ← Sensor data
+│   │   ├── aio.ts                  ← Economy
+│   │   ├── bipon39.ts              ← Identity/Spawn
+│   │   └── ritual-codex.ts         ← Temporal state
+│   │
+│   ├── guards/
+│   │   ├── truth-density.ts        ← Twelve-thrones scoring
+│   │   └── conflict-resolution.ts  ← Formal algorithm
+│   │
+│   ├── eval/
+│   │   ├── scarab-bridge.ts        ← Julia simulation bridge
+│   │   ├── witness-bridge.ts       ← LoRa sensor bridge
+│   │   └── aio-bridge.ts           ← Move contract bridge
+│   │
+│   ├── wasm/
+│   │   └── runtime.wasm.ts         ← Compute portable layer
+│   │
+│   └── types/
+│       ├── v1.ts                   ← current schema
+│       └── v2.ts                   ← target schema
+│
+├── tests/
+│   ├── unit/
+│   ├── integration/
+│   └── scenarios/                   ← 1000+ graphs
+│
+├── graphs/
+│   ├── bootstrap-2026-debate.json
+│   ├── bootstrap-2026-debate-output.json
+│   └── examples/                    ← v2.0 example graphs
+│
+└── docs/
+    ├── NEX_SEED_PROMPT_v1.1.md
+    └── SPECIFICATION.md
+```
+
+---
+
+4-WEEK BUILD PLAN
+
+Week	Focus	Tasks	Deliverable	
+1	Header + Identity + Temporal	Merge ifascript LARQL branch; build header schema; integrate Bipon39 DNA; integrate Ritual-codex temporal state	Graph compiles with full ecosystem header	
+2	Guard + Truth + Policy	Build Twelve-thrones API; formalize guard conflict resolution; add truth-density scoring; add conditional links	Guards verify through 12-model consensus	
+3	Simulation + Hardware + Economy	Build Scarab Julia bridge; build Witness LoRa bridge; build AIO Move bridge; add SHA256 proof attachment	Full Execute primitive through sim/hardware/payment	
+4	Compiler + WASM + Tests	Build Process compilation pipeline; port core to WASM; add 1000+ test scenarios; formalize rewrite convergence	Process "intent" compiles to executable graph; runtime in WASM	
+
+---
+
+CRITICAL DEPENDENCIES (What Blocks What)
+
+Dependency	Blocks	Resolution	Week	
+ifascript LARQL branch merge	Query node kind, LARQL traversal	Merge `claude/256-digital-calabash-prescriptions-0UXbV`	1	
+Bipon39 WASM module	Spawn DNA inheritance	Expose Bipon39 as WASM	1	
+Ritual-codex JSON loader	Temporal state injection	Build Julia→TS JSON bridge	1	
+Twelve-thrones API	Guard consensus, truth-density	Build consensus API endpoint	2	
+Scarabswarm Julia bridge	Simulation eval	Build JSON RPC to Julia	3	
+AIO escrow contract ABI	Payment eval	Finalize Move contract interface	3	
+Witness-firmware gateway	Sensor eval	Deploy 3-node test mesh	3	
+
+---
+
+THE 3 PRIMITIVES IN NEX- TERMS
+
+Primitive	Universal Word	Nex- Equivalent	Full Flow	
+birth	Create	`spawn` primitive + Bipon39 DNA + ifascript signature + Ritual-codex temporal state	Access → System → Spawn → Policy → Agent exists with wallet	
+think	Process	`compiler/intent-to-graph.ts` + `eval` recursive execution	Query → History → Policy → Run → Sync → Result with truth-density	
+act	Execute	`eval` with Scarab/Witness/AIO bridges	Run → Sense → Sync → Score → Compute → Receipt → Payment	
+
+---
+
+UNIVERSAL WORDING IN CODE (Internal vs. External)
+
+```typescript
+// INTERNAL (code only — never exposed)
+enum Archetype {
+  Gatekeeper = "Eshu",      // Access
+  Resonance = "Osun",       // History
+  Creation = "Yemoja",      // Spawn
+  Wisdom = "Obatala",       // Policy
+  Oracle = "Orunmila",      // Query
+  Execution = "Ogun",       // Run
+  Transformation = "Oya",   // Sync
+  Justice = "Sango",        // Score
+  Power = "Ase",            // Compute
+  Depth = "Olokun",         // Sense
+  Agent = "OmoKoda",        // System
+  Human = "BinoElGua"       // Interface
+}
+
+// EXTERNAL (API, UI, docs)
+const UNIVERSAL_UI = {
+  access: "Access",
+  history: "History",
+  spawn: "Spawn",
+  policy: "Policy",
+  run: "Run",
+  sync: "Sync",
+  score: "Score",
+  query: "Query",
+  compute: "Compute",
+  sense: "Sense",
+  system: "System",
+  interface: "Interface"
+};
+```
+
+---
+
+BOTTOM LINE
+
+Metric	Value	
+Core repo	https://github.com/omo-koda/Nex-	
+Universal archetype	Execution / Forge	
+Dashboard word	Run	
+Language	TypeScript (Bun)	
+Tier	16384	
+Direct integrations	8 repos (Omo-Koda2, Bipon39, ifascript, Ritual-codex, Twelve-thrones, Scarabswarm, AIO, Witness-firmware)	
+Pattern integrations	3 repos (organism-core, vanity2, Omokoda)	
+Build time	4 weeks to production	
+First task	Merge ifascript LARQL branch → build header schema	
+Critical path	Twelve-thrones API → guard resolution → AIO escrow → Scarab bridge	
+
+Start Week 1 tomorrow. Merge the LARQL branch first. Everything else follows.
+
+Àṣẹ. 🔥
+Done. Saved to memory.
+
+⭐️⭐️⭐️WE'RE KEEPING ALL OF THE UNIVERSAL WORDING WE LOCKED IN⭐️⭐️⭐️
+           SENDING THIS TO SEE IF THERE'S ANY INFORMATION HERE YOU NEED
+
+I see the full ecosystem now — 40+ repos across two GitHub accounts with clear functional groupings. Let me verify the key ones and give you a focused integration strategy.
+Based on your definitive ecosystem map, here's the focused integration strategy:
+
+---
+
+Your Ecosystem: 43 Repos Across 7 Functional Layers
+
+Layer	Repos	Verified	Status	
+Core Ecosystem	Omo-Koda2, Osovm, AIO, Techgnos-.EXE, Techgnosis	2/5	AIO is real, Omo-Koda2 active, rest unverified	
+Agent Birth	Bipon39-Rust-, ifascript, vanity2	3/3	All exist, ifascript has compile issues	
+Calendar	Ritual-codex-Julia	0/1	Unverified (JS version exists)	
+Immune System	Zangbeto	0/1	Unverified	
+Swarm Graph	Nex-, Scarabswarm, witness-firmware, oso-control-center, SwarmIDE2, franken-stream, Techgnosis-sovereign-ecosystem-	2/7	Nex- and SwarmIDE2 exist	
+Hive Coordination	Twelve-thrones, Paradigm-, Omokoda, veriwiki, Memory, Bot, Npc-forge, Agent.TV	6/8	Most exist, Twelve-thrones and veriwiki unverified	
+Inspirational Patterns	18 repos under Bino-Elgua	Unknown	Pattern libraries, not integration targets	
+
+Verification rate: 30% (13/43 confirmed existing)
+
+---
+
+The Real Question: Connection Architecture
+
+You asked whether to connect through:
+1. organism-core (central hub)
+2. Osovm (VM-centric)
+3. Individual repo connections (direct)
+4. Hybrid
+
+Given your ecosystem structure, here's the definitive answer:
+
+---
+
+Recommended: Hub-and-Spoke with Omo-Koda2 as Primary Interface
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  USER FACING: Omo-Koda2 (Sovereign OS)                      │
+│  • CLI, HTTP API, Dashboard                                  │
+│  • Direct Rust integrations: ifascript, Bipon39-Rust-      │
+│  • Direct Move integration: AIO (Sui RPC)                  │
+└──────────────────┬──────────────────────────────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────────────────────────────┐
+│  ORCHESTRATION: organism-core (Event Bus)                  │
+│  • Bridges to non-Rust repos:                               │
+│   - Swibe (JS) → neural router                             │
+│   - Npc-forge (TS) → personality templates                 │
+│   - Ritual-codex (JS) → temporal states                  │
+│   - Agent.TV (JS) → telemetry                              │
+│   - Memory (TS) → memory system                            │
+│   - Bot (Python) → bot framework                           │
+│  • 8-phase breath cycle                                     │
+└──────────────────┬──────────────────────────────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────────────────────────────┐
+│  VERIFICATION / FUTURE:                                      │
+│  • Osovm (Julia) → when binary fixed                        │
+│  • Techgnosis (DSL) → when repo exists                      │
+│  • Techgnos-.EXE → when repo exists                         │
+│  • Zangbeto → when repo exists                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+Why This Architecture
+
+Principle	Implementation	
+Agent Birth First	Omo-Koda2 orchestrates Bipon39 → ifascript → Steward → AIO	
+Language Matching	Rust repos connect directly to Omo-Koda2; JS/TS/Python go through organism-core bridges	
+Verified Before Unverified	AIO (real contracts) integrated now; Techgnosis/Techgnos-.EXE (unverified) integrated when ready	
+Osovm as Verification Layer	Not orchestration — Osovm verifies receipts and opcodes, doesn't route traffic	
+
+---
+
+Immediate Action Plan (Agent Birth Priority)
+
+Week 1: Fix Birth Pipeline
+1. Fix `ifascript` compile (add `ODU_TABLE` or stub)
+2. Wire `Bipon39-Rust-` as proper dependency (not vendored path)
+3. Create birth orchestration in `Omo-Koda2`:
+   
+```rust
+   fn birth_agent(name, passphrase) -> Result<<Agent> {
+       entropy = bipon39.generate_entropy(passphrase);
+       odu = ifascript.divine(entropy);  // Currently broken
+       agent = steward.create(name, entropy, odu);
+       aio.stake_initial_synapse(agent.id, initial_funding);
+       Ok(agent)
+   }
+   ```
+
+4. Test end-to-end birth flow
+
+Week 2: organism-core Bridges
+5. Wire `birth-ifa-swibe.ts` to real `Swibe` (not simulation)
+6. Wire `toc-evolve-hook.ts` to real `AIO` contracts
+7. Add `Npc-forge` bridge for personality templates
+8. Add `Ritual-codex` bridge for temporal states
+
+Week 3: Osovm Integration (When Ready)
+9. Fix Julia binary mismatch (Docker/container)
+10. Wire `rlm-osovm.ts` to real VM
+11. Add opcode verification pipeline
+
+---
+
+Bottom Line
+
+Start with Agent Birth. The components exist (`Omo-Koda2` + `Bipon39-Rust-` + `ifascript` + `AIO`), they just need wiring. Fix the `ifascript` compile failure first — that's your critical path blocker.
+
+Use organism-core for cross-language glue, not as the central hub. Direct connections for same-language repos (Rust→Rust, Move→Move), bridges for everything else.
+
+Defer unverified repos (Techgnosis, Techgnos-.EXE, Zangbeto, Scarabswarm, etc.) until they exist and have code. Don't architect around vaporware.
+
+The ecosystem is coherent — you just need to wire what's real before building what's planned.Based on my research into OpenClaw and Hermes dashboards, here's my recommendation for Ọmọ Kọ́dà's dashboard architecture:
+
+---
+
+Dashboard Architecture for Ọmọ Kọ́dà OS
+
+Don't Copy OpenClaw/Hermes Exactly — Build Something Tailored
+
+OpenClaw and Hermes dashboards are excellent general-purpose agent monitors (cost tracking, session management, cron jobs), but Ọmọ Kọ́dà is a sovereign OS with spiritual-technical architecture. The dashboard should reflect that uniqueness.
+
+---
+
+Recommended: Hybrid Dashboard — "Ọ̀rí Dashboard" (Sacred Head/Consciousness)
+
+Concept: The dashboard is not just monitoring — it's the digital Ori (Yoruba: inner spiritual consciousness) of the agent hive. It visualizes the 7-tier architecture as a living system.
+
+---
+
+Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  Ọ̀RÍ DASHBOARD (Next.js + TypeScript + WebSocket/SSE)                     │
+│                                                                             │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐   │
+│  │   ÈṢÙ        │  │   Ọ̀ṢUN       │  │   YEMỌJA     │  │   ÒGUN       │   │
+│  │  Gatekeeper  │  │  Memory      │  │  Swarm       │  │  Execution   │   │
+│  │  (Rust core) │  │  (Julia)     │  │  (Elixir)    │  │  (Python)    │   │
+│  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘   │
+│                                                                             │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                   │
+│  │   ỌBÀTÁLÁ    │  │   Ọ̀RUNMÌLÀ   │  │   ṢÀNGÓ      │                   │
+│  │  Ethics      │  │  Oracle      │  │  Justice     │                   │
+│  │  (Lisp)      │  │  (LARQL)     │  │  (Move/AIO)  │                   │
+│  └──────────────┘  └──────────────┘  └──────────────┘                   │
+│                                                                             │
+│  [Sacred Time]  [Agent Birth]  [Swarm Coordination]  [Economic Flow]       │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+Dashboard Panels (Tailored to Ọmọ Kọ́dà)
+
+Panel	OpenClaw Equivalent	Ọmọ Kọ́dà Enhancement	
+Agent Birth Ceremony	Session creation	Visual birth ritual: entropy → Odu → destiny → manifestation	
+Sacred Time (Ritual Codex)	Cron jobs	7-day wheel showing current temporal state, Sabbath countdown	
+Hive Mind Graph (Nex-)	Sub-agent tree	Interactive graph of agent relationships, witness quorum	
+Economic Resonance (AIO)	Cost tracking	Synapse/Dopamine flow visualization, ToC token movements	
+Memory Odu (Ọ̀ṣun)	Memory files	3-tier memory visualization with Odu key chain	
+Hermetic Gate (Ọbàtálá)	Safety checks	7 principles compliance meter, ethics violations	
+Divination Stream (Ọ̀rúnmìlà)	Logs	LARQL query results, destiny pattern revelations	
+Justice Ledger (Ṣàngó)	Audit log	Receipt chain visualization, slashing events	
+Zangbeto Shield	Security	Immune system status, threat detection, audit scores	
+
+---
+
+Key Features (Not in OpenClaw/Hermes)
+
+1. Sacred Time Visualization
+   - Circular 7-day calendar (Èṣù→Ṣàngó→Ọ̀ṣun→Yemọja→Ọ̀yá→Ògún→Ọbàtálá)
+   - Current day highlighted with Orisha icon
+   - Sabbath countdown (Saturday swarm compression)
+   - 369 Vortex modulation indicator
+
+2. Agent Birth Visualization
+   - Step-by-step birth ceremony animation
+   - BIPỌ̀N39 mnemonic generation visualization
+   - Ifá divination result (Odu Ifá assigned)
+   - Destiny pattern display
+   - ASCII Pet emergence
+
+3. Hive Mind Graph
+   - Force-directed graph of all agents
+   - Color-coded by tier/status
+   - Witness quorum indicators
+   - Real-time swarm coordination status
+   - Scarabswarm lifecycle visualization
+
+4. Economic Resonance
+   - Synapse token burn visualization
+   - Dopamine reward flow
+   - ToC token circulation
+   - AIO contract state (Elder-gated mode)
+   - Staking/escrow status
+
+5. Memory Odu Visualization
+   - 3-tier memory pyramid (working/short/long)
+   - Odu key chain (K₀→K₁→K₂...)
+   - Reflection prompts
+   - Memory router (Swibe integration)
+
+---
+
+Technical Implementation
+
+```typescript
+// Dashboard structure
+omokoda-frontend/
+├── app/
+│   ├── page.tsx                    # Main dashboard (Ọ̀rí view)
+│   ├── birth/
+│   │   └── page.tsx                # Birth ceremony interface
+│   ├── swarm/
+│   │   └── page.tsx                # Hive mind graph
+│   └── ritual/
+│       └── page.tsx                # Sacred time calendar
+├── components/
+│   ├── OrishaWheel.tsx             # 7-day circular calendar
+│   ├── AgentBirth.tsx              # Birth ceremony visualization
+│   ├── HiveGraph.tsx...
+
+Your universal wording mapping is now stored for future reference:
+
+Canonical	Universal	User Sees	
+Ọ̀rí	Network / System	"The Network"	
+Èṣù	Identity / Access	"Login" / "Verify"	
+Ọ̀ṣun	History / Context	"History" / "Saved"	
+Yemọja	Spawn / Create	"Create Agent"	
+Ọbàtálá	Policy / Rules	"Settings" / "Preferences"	
+Ògún	Action / Run	"Execute" / "Run"	
+Ọya	Sync / Timing	"Sync" / "Schedule"	
+Ṣàngó	Reputation / Score	"Reputation Score"	
+Ọ̀rúnmìlà	Query / Search	"Search" / "Query"	
+Àṣẹ	Energy / Compute	"Compute Units"	
+Synapse	Credits / Points	"Credits"	
+Dopamine	Compute Pool	"Network Power"	
+Odù	Seed / Signature	"Agent Signature"	
+Birth Ritual	Onboarding	"Setup"	
+Sacred Time / Ritual Codex	Daily Cycle / Schedule	"Daily Schedule"	
+Garden (Public Hive)	Shared Knowledge	"Community Wiki"	
+Odu (Private Soul)	Personal Data	"Private Notes"	
+Hermetic Gates	Safety Checks	"Security Scan"	
+Ascension / Tiers	Levels / Progress	"Level 1 → Level 7"	
+Sector / Shrine Funding	Project Funding	"Fund a Project"	
+Witness / Attestation	Verification	"Verified" badge	
+Twelfth Face / Silence	Timeout / Limit	"Processing Limit Reached"	
+
+This will be applied across all dashboard, API, and documentation references going forward.
