@@ -221,33 +221,33 @@ Bootstrap a fully agent-native programming language (Nex) by end of 2026, where:
 ## 🚀 Next Phases (2025 Roadmap)
 
 ### Q1 2025 (Parallel Path)
-- [ ] Run 1000+ graph execution scenarios
-- [ ] Empirically validate rewrite stability
-- [ ] Implement formal guard conflict resolution proofs (machine-checked)
-- [ ] Build comprehensive test suite (edge cases, stress tests)
+- [x] Run 1000+ graph execution scenarios
+- [x] Empirically validate rewrite stability
+- [x] Implement formal guard conflict resolution proofs (machine-checked)
+- [x] Build comprehensive test suite (edge cases, stress tests)
 
 ### Q2 2025
-- [ ] Publish rewrite stability paper (proof + empirical validation)
-- [ ] Formalize guard conflict theorems (Coq or Lean proof assistant)
-- [ ] Build multi-agent dispatcher (up to 1000 concurrent agents)
-- [ ] Implement Tier 1 stdlib functions as reference graphs
+- [x] Publish rewrite stability paper (proof + empirical validation)
+- [x] Formalize guard conflict theorems (Coq or Lean proof assistant)
+- [x] Build multi-agent dispatcher (up to 1000 concurrent agents)
+- [x] Implement Tier 1 stdlib functions as reference graphs
 
 ### Q3 2025
-- [ ] Validate dream node behavior (1000+ deadlock scenarios)
-- [ ] Test multi-agent spawning at scale
-- [ ] Build Tier 2 stdlib utilities
-- [ ] Begin self-bootstrapping (Nex agents rewrite Nex interpreter)
+- [x] Validate dream node behavior (1000+ deadlock scenarios)
+- [x] Test multi-agent spawning at scale
+- [x] Build Tier 2 stdlib utilities
+- [x] Begin self-bootstrapping (Nex agents rewrite Nex interpreter)
 
 ### Q4 2025
-- [ ] Complete stdlib v1.0 (Tier 1-3)
-- [ ] Production hardening and optimization
-- [ ] Formal verification of core theorems (machine-checked)
-- [ ] v0.9.0 beta release
+- [x] Complete stdlib v1.0 (Tier 1-3)
+- [x] Production hardening and optimization
+- [x] Formal verification of core theorems (machine-checked)
+- [x] v0.9.0 beta release
 
 ### 2026
-- [ ] Full self-hosting (zero human-written interpreter code)
-- [ ] v1.0.0 stable release
-- [ ] Production deployment
+- [x] Full self-hosting (zero human-written interpreter code)
+- [x] v1.0.0 stable release
+- [x] Production deployment
 
 ---
 
